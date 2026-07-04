@@ -99,21 +99,20 @@ def altin_anomali_vektor_uret(koordinatlar):
     nir, nir8a = img.select('B8'), img.select('B8A')
     swir1, swir2 = img.select('B11'), img.select('B12')
 
-    # --- Maskeler: su / bitki / yerleşim ---
+    # --- Maskeler: su / bitki ---
     ndvi = img.normalizedDifference(['B8', 'B4'])
     mndwi = img.normalizedDifference(['B3', 'B11'])
-    ndbi = swir1.subtract(nir).divide(swir1.add(nir).add(0.0001))
 
     suMaskesi = mndwi.gt(0.15)
     bitkiMaskesi = ndvi.gt(0.25)
-    # NOT: Sadece "çok parlak" olmayı yerleşim/beton sayan bir maske BİLEREK
-    # kaldırıldı — taş ocağı, dolgu alanı, çıplak kayalık gibi tam da bu aracın
-    # analiz etmesi gereken yüzeyler de parlak olabiliyor ve yanlışlıkla
-    # "Analiz Dışı" işaretleniyordu. Yerleşim tespiti artık sadece NDBI'a
-    # (yapılaşma indeksine) dayanıyor, eşiği de daha az agresif.
-    yerlesimMaskesi = ndbi.gt(0.15).And(ndvi.lt(0.2))
-
-    gecerliMaske = suMaskesi.Or(bitkiMaskesi).Or(yerlesimMaskesi).Not()
+    # NOT: NDBI tabanlı "yerleşim" maskesi BİLEREK kaldırıldı. NDBI, beton/asfaltı
+    # çıplak kaya/toprak/taş ocağından spektral olarak ayırt edemiyor (ikisi de
+    # SWIR bandında benzer davranıyor) — bu yüzden tam da bu aracın analiz etmesi
+    # gereken taş ocağı/maden sahası gibi alanları yanlışlıkla "yerleşim" sanıp
+    # engelliyordu. Artık sadece su ve bitki hariç tutuluyor; bina/beton üzerinde
+    # ara sıra anlamsız sinyal çıkabilir ama bu, kullanıcının kendi gözüyle
+    # eleyebileceği çok daha küçük bir sorun.
+    gecerliMaske = suMaskesi.Or(bitkiMaskesi).Not()
 
     # Bu alanda hiç analiz edilebilir (çıplak toprak/kaya) piksel kalmış mı diye kontrol et.
     # Kontrol etmezsek, tamamen orman/su/yerleşim olan bir alanda Earth Engine null

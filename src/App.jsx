@@ -17,7 +17,7 @@ const RENKLER = {
 };
 
 const ETIKETLER = {
-  '-1': 'Analiz Dışı (su / bitki örtüsü / yerleşim)',
+  '-1': 'Analiz Dışı (su / bitki örtüsü)',
   '0': 'Anomali Yok',
   '1': 'Zayıf Anomali',
   '2': 'Orta Anomali',
