@@ -3,6 +3,7 @@ import json
 import os
 import ee
 import requests
+from datetime import datetime, timedelta
 from google.oauth2 import service_account
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -71,11 +72,28 @@ def altin_anomali_vektor_uret(koordinatlar):
     kord_listesi = [[k['lng'], k['lat']] for k in koordinatlar]
     aoi = ee.Geometry.Polygon([kord_listesi])
 
-    # Son ~18 ay içindeki, bulut oranı düşük Sentinel-2 görüntülerinin medyan bileşimi.
+    # ÖNEMLİ DÜZELTME: 18 aylık medyan yerine SON 90 GÜN kullanılıyor.
+    # Aktif maden/taş ocağı gibi hızla değişen sahalarda, uzun dönem medyan almak
+    # sahanın ESKİ (örn. hâlâ ormanken çekilmiş) halini baskın hale getirip güncel
+    # çıplak durumu maskeliyordu. Kısa pencere, güncel yüzey durumunu yansıtır.
+    bugun = datetime.utcnow()
+    baslangic_tarihi = (bugun - timedelta(days=90)).strftime('%Y-%m-%d')
+    bitis_tarihi = (bugun + timedelta(days=1)).strftime('%Y-%m-%d')
+
     s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
         .filterBounds(aoi) \
-        .filterDate('2025-01-01', '2026-07-04') \
-        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 40))
+        .filterDate(baslangic_tarihi, bitis_tarihi) \
+        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 50))
+
+    # Son 90 günde yeterli görüntü yoksa (çok bulutlu bölge vb.), otomatik olarak
+    # son 6 aya genişlet.
+    goruntu_sayisi = s2.size().getInfo()
+    if goruntu_sayisi < 2:
+        baslangic_tarihi = (bugun - timedelta(days=180)).strftime('%Y-%m-%d')
+        s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
+            .filterBounds(aoi) \
+            .filterDate(baslangic_tarihi, bitis_tarihi) \
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 60))
 
     def maskS2(image):
         scl = image.select('SCL')
