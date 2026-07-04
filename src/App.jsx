@@ -102,15 +102,23 @@ function AnaUygulama({ oturum, rol }) {
   const [sonucGorunur, setSonucGorunur] = useState(true);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [asama, setAsama] = useState('boşta'); // boşta | uyduGeliyor | taraniyor | tamamlandı
+  const [detayAsamasi, setDetayAsamasi] = useState(0);
   const [hata, setHata] = useState(null);
   const [gecmis, setGecmis] = useState([]);
   const [adminPaneliAcik, setAdminPaneliAcik] = useState(false);
   const ciziliKatmanRef = useRef(null);
 
+  const TARAMA_ASAMALARI = [
+    'Uygun uydu aranıyor...',
+    'Uyduya bağlanılıyor...',
+    'Uydu verileri alınıyor...',
+    'Uydu verileri analiz ediliyor...',
+  ];
+
   const gecmisiYukle = useCallback(async () => {
     const { data, error } = await supabase
       .from('taramalar')
-      .select('id, created_at, durum, koordinatlar, isim')
+      .select('id, created_at, durum, koordinatlar, konum_adi')
       .order('created_at', { ascending: false })
       .limit(20);
     if (!error) setGecmis(data);
@@ -119,6 +127,18 @@ function AnaUygulama({ oturum, rol }) {
   useEffect(() => {
     gecmisiYukle();
   }, [gecmisiYukle]);
+
+  // Tarama sırasında alt-aşama metnini döngüyle değiştir (arka planda ciddi bir iş yapıldığı hissini verir)
+  useEffect(() => {
+    if (asama !== 'taraniyor') {
+      setDetayAsamasi(0);
+      return;
+    }
+    const zamanlayici = setInterval(() => {
+      setDetayAsamasi((i) => (i + 1) % TARAMA_ASAMALARI.length);
+    }, 1600);
+    return () => clearInterval(zamanlayici);
+  }, [asama]);
 
   const alanCizildi = useCallback((koordinatlar, katman) => {
     // Önceki çizim varsa temizle (tek seferde bir alan)
@@ -133,6 +153,22 @@ function AnaUygulama({ oturum, rol }) {
 
   const beklet = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  const konumAdiniBul = async (koordinatlar) => {
+    try {
+      const ortLat = koordinatlar.reduce((t, k) => t + k.lat, 0) / koordinatlar.length;
+      const ortLng = koordinatlar.reduce((t, k) => t + k.lng, 0) / koordinatlar.length;
+      const yanit = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${ortLat}&lon=${ortLng}&zoom=14`
+      );
+      const veri = await yanit.json();
+      const a = veri.address || {};
+      const parcalar = [a.suburb || a.neighbourhood || a.village, a.town || a.city || a.county].filter(Boolean);
+      return parcalar.length ? parcalar.join(', ') : (veri.display_name || 'Bilinmeyen Konum');
+    } catch {
+      return 'Bilinmeyen Konum';
+    }
+  };
+
   const taramayiBaslat = async () => {
     if (!ciziliAlan || ciziliAlan.length < 3) {
       setHata('Önce haritada sol üstteki poligon/dikdörtgen aracıyla bir alan çiz.');
@@ -145,9 +181,11 @@ function AnaUygulama({ oturum, rol }) {
     setAsama('uyduGeliyor');
 
     try {
+      const konumAdi = await konumAdiniBul(ciziliAlan);
+
       const { data: kayit, error: eklemeHatasi } = await supabase
         .from('taramalar')
-        .insert({ koordinatlar: ciziliAlan, durum: 'İşleniyor', kullanici_id: oturum.user.id })
+        .insert({ koordinatlar: ciziliAlan, durum: 'İşleniyor', kullanici_id: oturum.user.id, konum_adi: konumAdi })
         .select()
         .single();
 
@@ -187,6 +225,17 @@ function AnaUygulama({ oturum, rol }) {
       setYukleniyor(false);
       setAsama('boşta');
     }
+  };
+
+  const gecmisTaramaSil = async (id, e) => {
+    e.stopPropagation();
+    if (!window.confirm('Bu taramayı silmek istediğine emin misin?')) return;
+    const { error } = await supabase.from('taramalar').delete().eq('id', id);
+    if (error) {
+      setHata('Silinemedi: ' + error.message);
+      return;
+    }
+    setGecmis((liste) => liste.filter((t) => t.id !== id));
   };
 
   const gecmisTaramayiAc = async (id) => {
@@ -253,11 +302,6 @@ function AnaUygulama({ oturum, rol }) {
         {/* SOL PANEL */}
         <div style={{ width: '320px', background: '#0f172a', color: 'white', padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           <h2 style={{ marginTop: 0, fontSize: '18px' }}>Uydu Alterasyon Taraması</h2>
-          <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.4 }}>
-            Haritada sol üstteki araçlarla bir alan çiz, ardından "Taramayı Başlat" butonuna bas.
-            Sonuç, Sentinel-2 yüzey verisinden hesaplanan bir alterasyon anomalisidir;
-            yer altı derinliği göstermez, sahada doğrulama gerektirir.
-          </p>
 
           <button
             onClick={taramayiBaslat}
@@ -309,12 +353,24 @@ function AnaUygulama({ oturum, rol }) {
               <div
                 key={t.id}
                 onClick={() => gecmisTaramayiAc(t.id)}
-                style={{ padding: '8px', marginBottom: '6px', background: '#1e293b', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
+                style={{ padding: '8px', marginBottom: '6px', background: '#1e293b', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}
               >
-                <div>{new Date(t.created_at).toLocaleString('tr-TR')}</div>
-                <div style={{ color: t.durum === 'Tamamlandı' ? '#4ade80' : t.durum === 'Hata' ? '#f87171' : '#fbbf24' }}>
-                  {t.durum}
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {t.konum_adi || 'Konum bulunamadı'}
+                  </div>
+                  <div style={{ color: '#64748b', fontSize: '11px' }}>{new Date(t.created_at).toLocaleString('tr-TR')}</div>
+                  <div style={{ color: t.durum === 'Tamamlandı' ? '#4ade80' : t.durum === 'Hata' ? '#f87171' : '#fbbf24' }}>
+                    {t.durum}
+                  </div>
                 </div>
+                <button
+                  onClick={(e) => gecmisTaramaSil(t.id, e)}
+                  title="Sil"
+                  style={{ flexShrink: 0, background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '14px', padding: '2px 4px' }}
+                >
+                  🗑
+                </button>
               </div>
             ))}
           </div>
@@ -332,15 +388,18 @@ function AnaUygulama({ oturum, rol }) {
           {/* EVRE 1: UYDU KONUMA YÖNELİYOR */}
           {asama === 'uyduGeliyor' && (
             <div style={{
-              position: 'absolute', inset: 0, background: 'rgba(2, 6, 23, 0.55)',
+              position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 50%, rgba(15,23,42,0.75), rgba(2,6,23,0.85))',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               zIndex: 2000, pointerEvents: 'none', overflow: 'hidden',
             }}>
-              <div className="uydu-yolu">
-                <span style={{ fontSize: '34px' }}>🛰️</span>
+              <div className="uydu-yolu" style={{ filter: 'drop-shadow(0 0 14px rgba(56,189,248,0.7))' }}>
+                <span style={{ fontSize: '40px' }}>🛰️</span>
               </div>
-              <div className="nabiz-metin" style={{ color: 'white', fontSize: '14px', fontWeight: 600, marginTop: '10px' }}>
-                Uydu, seçilen konuma yönleniyor...
+              <div className="nabiz-metin" style={{ color: 'white', fontSize: '15px', fontWeight: 700, marginTop: '14px', letterSpacing: '0.3px' }}>
+                Uygun uydu aranıyor...
+              </div>
+              <div style={{ color: '#64748b', fontSize: '11px', marginTop: '4px' }}>
+                Yörüngedeki Sentinel-2 geçişleri taranıyor
               </div>
             </div>
           )}
@@ -348,18 +407,29 @@ function AnaUygulama({ oturum, rol }) {
           {/* EVRE 2: TARAMA YAPILIYOR */}
           {asama === 'taraniyor' && (
             <div style={{
-              position: 'absolute', inset: 0, background: 'rgba(2, 6, 23, 0.55)',
+              position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 50%, rgba(15,23,42,0.75), rgba(2,6,23,0.88))',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               zIndex: 2000, pointerEvents: 'none',
             }}>
-              <div style={{ position: 'relative', width: '60px', height: '60px', marginBottom: '18px' }}>
-                <div className="radar-halka" />
-                <div className="radar-halka gecikmeli" />
+              <div style={{ position: 'relative', width: '90px', height: '90px', marginBottom: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div className="radar-halka" style={{ width: '90px', height: '90px' }} />
+                <div className="radar-halka gecikmeli" style={{ width: '90px', height: '90px' }} />
+                <div className="tarama-cizgisi" />
+                <span style={{ fontSize: '26px', position: 'relative', zIndex: 1 }}>🛰️</span>
               </div>
-              <div className="nabiz-metin" style={{ color: 'white', fontSize: '14px', fontWeight: 600, letterSpacing: '0.3px' }}>
-                Sentinel-2 verisi taranıyor...
+              <div key={detayAsamasi} className="yumusak-giris" style={{ color: 'white', fontSize: '15px', fontWeight: 700, letterSpacing: '0.3px', minHeight: '20px' }}>
+                {TARAMA_ASAMALARI[detayAsamasi]}
               </div>
-              <div style={{ color: '#94a3b8', fontSize: '12px', marginTop: '4px' }}>
+              <div style={{ display: 'flex', gap: '5px', marginTop: '12px' }}>
+                {TARAMA_ASAMALARI.map((_, i) => (
+                  <div key={i} style={{
+                    width: '7px', height: '7px', borderRadius: '50%',
+                    background: i === detayAsamasi ? '#38bdf8' : '#334155',
+                    transition: 'background 0.3s',
+                  }} />
+                ))}
+              </div>
+              <div style={{ color: '#64748b', fontSize: '11px', marginTop: '14px' }}>
                 Bu işlem alanın büyüklüğüne göre biraz sürebilir
               </div>
             </div>
@@ -385,6 +455,8 @@ function AnaUygulama({ oturum, rol }) {
 export default function App() {
   const [oturum, setOturum] = useState(undefined); // undefined: henüz kontrol edilmedi, null: giriş yok
   const [rol, setRol] = useState('kullanici');
+  const [hesapAktif, setHesapAktif] = useState(true);
+  const [profilYuklendi, setProfilYuklendi] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setOturum(data.session));
@@ -398,8 +470,15 @@ export default function App() {
 
   useEffect(() => {
     if (!oturum) return;
-    supabase.from('profiller').select('rol').eq('id', oturum.user.id).single()
-      .then(({ data }) => setRol(data?.rol || 'kullanici'));
+    supabase.from('profiller').select('rol, aktif').eq('id', oturum.user.id).single()
+      .then(({ data }) => {
+        setRol(data?.rol || 'kullanici');
+        setHesapAktif(data?.aktif !== false);
+        setProfilYuklendi(true);
+        if (data?.aktif === false) {
+          supabase.auth.signOut();
+        }
+      });
   }, [oturum]);
 
   if (oturum === undefined) {
@@ -412,6 +491,16 @@ export default function App() {
 
   if (!oturum) {
     return <Giris />;
+  }
+
+  if (profilYuklendi && !hesapAktif) {
+    return (
+      <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#020617', color: 'white', gap: '10px' }}>
+        <div style={{ fontSize: '30px' }}>🚫</div>
+        <div style={{ fontSize: '15px', fontWeight: 600 }}>Hesabın devre dışı bırakılmış</div>
+        <div style={{ fontSize: '12px', color: '#94a3b8' }}>Erişim için yöneticinle iletişime geç.</div>
+      </div>
+    );
   }
 
   return <AnaUygulama oturum={oturum} rol={rol} />;

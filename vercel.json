@@ -2,6 +2,9 @@
   "functions": {
     "api/analyze.py": {
       "maxDuration": 60
+    },
+    "api/admin_kullanici_ekle.py": {
+      "maxDuration": 20
     }
   }
 }

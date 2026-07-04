@@ -77,3 +77,16 @@ html, body, #root {
 .uydu-yolu {
   animation: uyduSuzul 1.8s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
 }
+
+@keyframes cizgiDon {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.tarama-cizgisi {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(56,189,248,0.6), transparent 35%);
+  animation: cizgiDon 1.4s linear infinite;
+}

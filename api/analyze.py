@@ -26,6 +26,45 @@ def gee_baslat():
     _ee_hazir = True
 
 
+def kullanici_bilgisini_al(kullanici_token):
+    """Token'dan kullanıcı id'sini ve profilini (aktif/limit) çeker."""
+    kullanici_yaniti = requests.get(
+        f"{SUPABASE_URL}/auth/v1/user",
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {kullanici_token}"},
+        timeout=8,
+    )
+    if kullanici_yaniti.status_code != 200:
+        raise RuntimeError("Oturum doğrulanamadı, lütfen tekrar giriş yap.")
+    kullanici_id = kullanici_yaniti.json().get("id")
+
+    profil_yaniti = requests.get(
+        f"{SUPABASE_URL}/rest/v1/profiller?id=eq.{kullanici_id}&select=aktif,tarama_limiti",
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {kullanici_token}"},
+        timeout=8,
+    )
+    profiller = profil_yaniti.json()
+    if not profiller:
+        raise RuntimeError("Kullanıcı profili bulunamadı.")
+    return kullanici_id, profiller[0]
+
+
+def limit_kontrolu_yap(kullanici_id, tarama_limiti, kullanici_token, hariç_id):
+    if tarama_limiti is None:
+        return  # sınırsız
+    sayim_yaniti = requests.get(
+        f"{SUPABASE_URL}/rest/v1/taramalar?kullanici_id=eq.{kullanici_id}&id=neq.{hariç_id}&select=id",
+        headers={
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {kullanici_token}",
+            "Prefer": "count=exact",
+        },
+        timeout=8,
+    )
+    mevcut_sayi = len(sayim_yaniti.json())
+    if mevcut_sayi >= tarama_limiti:
+        raise RuntimeError(f"Tarama limitine ulaştın ({tarama_limiti}). Daha fazla tarama için yöneticinle iletişime geç.")
+
+
 def altin_anomali_vektor_uret(koordinatlar):
     gee_baslat()
 
@@ -182,6 +221,14 @@ class handler(BaseHTTPRequestHandler):
             veri = json.loads(body)
             kayit_id = veri.get('id')
             koordinatlar = veri['koordinatlar']
+
+            if not kullanici_token:
+                raise RuntimeError("Oturum bilgisi eksik, lütfen tekrar giriş yap.")
+
+            kullanici_id, profil = kullanici_bilgisini_al(kullanici_token)
+            if not profil.get('aktif', True):
+                raise RuntimeError("Hesabın devre dışı bırakılmış. Yöneticinle iletişime geç.")
+            limit_kontrolu_yap(kullanici_id, profil.get('tarama_limiti'), kullanici_token, kayit_id)
 
             geojson = altin_anomali_vektor_uret(koordinatlar)
             kayit_hatasi = supabase_guncelle(kayit_id, {"durum": "Tamamlandı", "sonuc": geojson}, kullanici_token)
