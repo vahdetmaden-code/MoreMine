@@ -112,7 +112,7 @@ def altin_anomali_vektor_uret(koordinatlar):
         scale=30,
         geometryType='polygon',
         labelProperty='sinif',
-        reducer=ee.Reducer.mode(),
+        reducer=ee.Reducer.countEvery(),
         maxPixels=1e9,
         bestEffort=True,
         eightConnected=True,
