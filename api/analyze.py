@@ -51,7 +51,7 @@ def altin_anomali_vektor_uret(koordinatlar):
     # Farklı çözünürlükteki bantları (10m / 20m) hizasız bırakmak, önceki denemede
     # gördüğün o anlamsız derecede büyük/kaba kareleri üretiyordu.
     ORTAK_CRS = 'EPSG:3857'
-    ORTAK_OLCEK = 10
+    ORTAK_OLCEK = 15  # Hız/detay dengesi için 15m (Sentinel-2 SWIR bantlarının gerçek çözünürlüğüne yakın)
 
     img = s2.map(maskS2).median().clip(aoi) \
         .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
@@ -60,7 +60,7 @@ def altin_anomali_vektor_uret(koordinatlar):
     nir, nir8a = img.select('B8'), img.select('B8A')
     swir1, swir2 = img.select('B11'), img.select('B12')
 
-    # --- Maskeler: su / bitki / yerleşim (daha sıkı) ---
+    # --- Maskeler: su / bitki / yerleşim ---
     ndvi = img.normalizedDifference(['B8', 'B4'])
     mndwi = img.normalizedDifference(['B3', 'B11'])
     ndbi = swir1.subtract(nir).divide(swir1.add(nir).add(0.0001))
@@ -69,39 +69,44 @@ def altin_anomali_vektor_uret(koordinatlar):
     suMaskesi = mndwi.gt(0.15)
     bitkiMaskesi = ndvi.gt(0.30)
     yerlesimMaskesi = ndbi.gt(0.05).And(ndvi.lt(0.25))
-    # Çatı/beton/asfalt gibi çok parlak ve bitkisiz yüzeyler için ek güvenlik
     parlakYuzeyMaskesi = parlaklik.gt(0.22).And(ndvi.lt(0.25))
 
     gecerliMaske = suMaskesi.Or(bitkiMaskesi).Or(yerlesimMaskesi).Or(parlakYuzeyMaskesi).Not()
 
     # --- Altın ile ilişkili alterasyon indeksleri ---
-    demirOksit = red.divide(blue.add(0.0001))
-    killiAlterasyon = swir1.divide(swir2.add(0.0001))
-    ferrozMineral = swir2.divide(nir8a.add(0.0001))
+    demirOksit = red.divide(blue.add(0.0001)).rename('d')
+    killiAlterasyon = swir1.divide(swir2.add(0.0001)).rename('k')
+    ferrozMineral = swir2.divide(nir8a.add(0.0001)).rename('f')
 
-    def adaptifNormalize(image, band_adi):
-        stats = image.updateMask(gecerliMaske).reduceRegion(
-            reducer=ee.Reducer.percentile([5, 95]),
-            geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK, maxPixels=1e10, bestEffort=True
-        )
-        p5 = ee.Number(stats.get(band_adi + '_p5'))
-        p95 = ee.Number(stats.get(band_adi + '_p95'))
+    # HIZ İYİLEŞTİRMESİ: üç indeksin istatistiğini AYRI AYRI değil TEK reduceRegion
+    # çağrısında (çok bantlı görüntü olarak) hesaplıyoruz -> Earth Engine'e daha az
+    # ağ isteği, daha hızlı yanıt.
+    uclu = demirOksit.addBands(killiAlterasyon).addBands(ferrozMineral)
+    istatistikler = uclu.updateMask(gecerliMaske).reduceRegion(
+        reducer=ee.Reducer.percentile([5, 95]),
+        geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK,
+        maxPixels=1e10, bestEffort=True, tileScale=4,
+    )
+
+    def normalizeEt(image, band_adi):
+        p5 = ee.Number(istatistikler.get(band_adi + '_p5'))
+        p95 = ee.Number(istatistikler.get(band_adi + '_p95'))
         genislik = ee.Number(p95.subtract(p5)).max(0.0001)
         return image.subtract(p5).divide(genislik).clamp(0, 1)
 
-    d = adaptifNormalize(demirOksit.rename('d'), 'd')
-    k = adaptifNormalize(killiAlterasyon.rename('k'), 'k')
-    f = adaptifNormalize(ferrozMineral.rename('f'), 'f')
+    d = normalizeEt(demirOksit, 'd')
+    k = normalizeEt(killiAlterasyon, 'k')
+    f = normalizeEt(ferrozMineral, 'f')
 
     skor = d.multiply(0.40).add(k.multiply(0.40)).add(f.multiply(0.20)).updateMask(gecerliMaske)
 
-    # Gürültü azaltma: artık net metre cinsinden, ortak ızgaraya oturmuş bir yarıçap
     skorPuruzsuz = skor.focal_median(radius=15, units='meters', kernelType='circle') \
         .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
 
     stats2 = skorPuruzsuz.reduceRegion(
         reducer=ee.Reducer.percentile([50, 75, 90, 97]),
-        geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK, maxPixels=1e10, bestEffort=True
+        geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK,
+        maxPixels=1e10, bestEffort=True, tileScale=4,
     )
     bandAdi = skorPuruzsuz.bandNames().get(0)
     e50 = ee.Number(stats2.get(ee.String(bandAdi).cat('_p50')))
@@ -141,7 +146,7 @@ def altin_anomali_vektor_uret(koordinatlar):
     return vektorler.getInfo()
 
 
-def supabase_guncelle(kayit_id, alanlar):
+def supabase_guncelle(kayit_id, alanlar, kullanici_token=None):
     if not (SUPABASE_URL and SUPABASE_KEY and kayit_id):
         return
     try:
@@ -149,7 +154,9 @@ def supabase_guncelle(kayit_id, alanlar):
             f"{SUPABASE_URL}/rest/v1/taramalar?id=eq.{kayit_id}",
             headers={
                 "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
+                # RLS kuralları auth.uid() kontrolü yaptığı için, anon key yerine
+                # isteği yapan kullanıcının kendi token'ıyla imzalıyoruz.
+                "Authorization": f"Bearer {kullanici_token or SUPABASE_KEY}",
                 "Content-Type": "application/json",
                 "Prefer": "return=minimal",
             },
@@ -163,7 +170,12 @@ def supabase_guncelle(kayit_id, alanlar):
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         kayit_id = None
+        kullanici_token = None
         try:
+            auth_header = self.headers.get('Authorization', '')
+            if auth_header.startswith('Bearer '):
+                kullanici_token = auth_header[len('Bearer '):]
+
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length)
             veri = json.loads(body)
@@ -171,7 +183,7 @@ class handler(BaseHTTPRequestHandler):
             koordinatlar = veri['koordinatlar']
 
             geojson = altin_anomali_vektor_uret(koordinatlar)
-            supabase_guncelle(kayit_id, {"durum": "Tamamlandı", "sonuc": geojson})
+            supabase_guncelle(kayit_id, {"durum": "Tamamlandı", "sonuc": geojson}, kullanici_token)
 
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
@@ -179,7 +191,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"basarili": True, "sonuc": geojson}).encode())
 
         except Exception as e:
-            supabase_guncelle(kayit_id, {"durum": "Hata", "hata_mesaji": str(e)})
+            supabase_guncelle(kayit_id, {"durum": "Hata", "hata_mesaji": str(e)}, kullanici_token)
             self.send_response(500)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
