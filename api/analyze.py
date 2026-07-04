@@ -72,28 +72,22 @@ def altin_anomali_vektor_uret(koordinatlar):
     kord_listesi = [[k['lng'], k['lat']] for k in koordinatlar]
     aoi = ee.Geometry.Polygon([kord_listesi])
 
-    # ÖNEMLİ DÜZELTME: 18 aylık medyan yerine SON 90 GÜN kullanılıyor.
-    # Aktif maden/taş ocağı gibi hızla değişen sahalarda, uzun dönem medyan almak
-    # sahanın ESKİ (örn. hâlâ ormanken çekilmiş) halini baskın hale getirip güncel
-    # çıplak durumu maskeliyordu. Kısa pencere, güncel yüzey durumunu yansıtır.
+    # ÖNEMLİ DÜZELTME (2. sürüm): Önceki "90 gün yetmezse 6 aya atla" mantığı
+    # ANİ ve TUTARSIZ sonuçlara yol açıyordu — sınırda bir görüntü daha/az
+    # bulununca sistem aniden bambaşka bir görüntü setine geçip sınıflandırmayı
+    # baştan aşağı değiştiriyordu. Artık TEK ve SABİT bir kural var: her zaman
+    # son 6 aylık pencereden, bulut oranına göre EN TEMİZ 10 görüntü seçiliyor.
+    # Bu, hem güncel hem de gün be gün tutarlı bir sonuç verir.
     bugun = datetime.utcnow()
-    baslangic_tarihi = (bugun - timedelta(days=90)).strftime('%Y-%m-%d')
+    baslangic_tarihi = (bugun - timedelta(days=180)).strftime('%Y-%m-%d')
     bitis_tarihi = (bugun + timedelta(days=1)).strftime('%Y-%m-%d')
 
     s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
         .filterBounds(aoi) \
         .filterDate(baslangic_tarihi, bitis_tarihi) \
-        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 50))
-
-    # Son 90 günde yeterli görüntü yoksa (çok bulutlu bölge vb.), otomatik olarak
-    # son 6 aya genişlet.
-    goruntu_sayisi = s2.size().getInfo()
-    if goruntu_sayisi < 2:
-        baslangic_tarihi = (bugun - timedelta(days=180)).strftime('%Y-%m-%d')
-        s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
-            .filterBounds(aoi) \
-            .filterDate(baslangic_tarihi, bitis_tarihi) \
-            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 60))
+        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 70)) \
+        .sort('CLOUDY_PIXEL_PERCENTAGE') \
+        .limit(10)
 
     def maskS2(image):
         scl = image.select('SCL')
