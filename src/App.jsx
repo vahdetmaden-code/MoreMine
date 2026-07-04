@@ -76,6 +76,17 @@ function CizimAraci({ onAlanCizildi }) {
   return null;
 }
 
+// Verilen koordinat setine haritayı odaklayan (uçarak giden) yardımcı bileşen
+function HaritaOdakla({ hedef }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!hedef || hedef.length < 3) return;
+    const sinirlar = L.latLngBounds(hedef.map((k) => [k.lat, k.lng]));
+    map.flyToBounds(sinirlar, { duration: 1.2, padding: [40, 40] });
+  }, [hedef, map]);
+  return null;
+}
+
 // Sayfa açıldığında kullanıcının konumunu bulup haritayı oraya götüren bileşen
 function KonumTespiti() {
   const map = useMap();
@@ -100,6 +111,7 @@ function AnaUygulama({ oturum, rol }) {
   const [ciziliAlan, setCiziliAlan] = useState(null);
   const [sonuc, setSonuc] = useState(null);
   const [sonucGorunur, setSonucGorunur] = useState(true);
+  const [odaklanilacakAlan, setOdaklanilacakAlan] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [asama, setAsama] = useState('boşta'); // boşta | uyduGeliyor | taraniyor | tamamlandı
   const [detayAsamasi, setDetayAsamasi] = useState(0);
@@ -243,13 +255,16 @@ function AnaUygulama({ oturum, rol }) {
     setSonuc(null);
     const { data, error } = await supabase
       .from('taramalar')
-      .select('sonuc, durum, hata_mesaji')
+      .select('sonuc, durum, hata_mesaji, koordinatlar')
       .eq('id', id)
       .single();
 
     if (error) {
       setHata('Kayıt okunamadı: ' + error.message);
       return;
+    }
+    if (data.koordinatlar) {
+      setOdaklanilacakAlan(data.koordinatlar);
     }
     if (data.durum === 'Hata') {
       setHata('Bu tarama hatayla sonuçlanmıştı: ' + (data.hata_mesaji || 'Detay yok.'));
@@ -259,6 +274,7 @@ function AnaUygulama({ oturum, rol }) {
       setHata('Bu tarama tamamlanmamış görünüyor (muhtemelen eski, yarıda kalmış bir deneme). Silip yeniden deneyebilirsin.');
       return;
     }
+    setSonucGorunur(true);
     setSonuc(data.sonuc);
   };
 
@@ -381,6 +397,7 @@ function AnaUygulama({ oturum, rol }) {
           <MapContainer center={[40.97, 29.06]} zoom={14} style={{ height: '100%', width: '100%' }}>
             <TileLayer url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxZoom={22} maxNativeZoom={20} />
             <KonumTespiti />
+            <HaritaOdakla hedef={odaklanilacakAlan} />
             <CizimAraci onAlanCizildi={alanCizildi} />
             {sonuc && sonucGorunur && <GeoJSON key={JSON.stringify(sonuc).length} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} />}
           </MapContainer>

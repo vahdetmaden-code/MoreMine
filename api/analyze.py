@@ -112,6 +112,21 @@ def altin_anomali_vektor_uret(koordinatlar):
 
     gecerliMaske = suMaskesi.Or(bitkiMaskesi).Or(yerlesimMaskesi).Or(parlakYuzeyMaskesi).Not()
 
+    # Bu alanda hiç analiz edilebilir (çıplak toprak/kaya) piksel kalmış mı diye kontrol et.
+    # Kontrol etmezsek, tamamen orman/su/yerleşim olan bir alanda Earth Engine null
+    # değerler üzerinde işlem yapmaya çalışıp anlaşılmaz bir hatayla çöküyor.
+    gecerli_sayim = gecerliMaske.selfMask().reduceRegion(
+        reducer=ee.Reducer.count(),
+        geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK, maxPixels=1e10, bestEffort=True, tileScale=4,
+    )
+    gecerli_piksel_adedi = list(gecerli_sayim.getInfo().values())[0] or 0
+    if gecerli_piksel_adedi < 15:
+        raise RuntimeError(
+            "Bu alanda analiz edilebilecek çıplak toprak/kaya yüzeyi bulunamadı "
+            "(alan neredeyse tamamen orman, su veya yerleşim olarak görünüyor). "
+            "Lütfen daha açık/çıplak arazi içeren bir alan seç."
+        )
+
     # --- Altın ile ilişkili alterasyon indeksleri ---
     demirOksit = red.divide(blue.add(0.0001)).rename('d')
     killiAlterasyon = swir1.divide(swir2.add(0.0001)).rename('k')
