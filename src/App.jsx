@@ -99,7 +99,9 @@ function KonumTespiti() {
 function AnaUygulama({ oturum, rol }) {
   const [ciziliAlan, setCiziliAlan] = useState(null);
   const [sonuc, setSonuc] = useState(null);
+  const [sonucGorunur, setSonucGorunur] = useState(true);
   const [yukleniyor, setYukleniyor] = useState(false);
+  const [asama, setAsama] = useState('boşta'); // boşta | uyduGeliyor | taraniyor | tamamlandı
   const [hata, setHata] = useState(null);
   const [gecmis, setGecmis] = useState([]);
   const [adminPaneliAcik, setAdminPaneliAcik] = useState(false);
@@ -129,14 +131,18 @@ function AnaUygulama({ oturum, rol }) {
     setHata(null);
   }, []);
 
-  const analizEt = async () => {
+  const beklet = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  const taramayiBaslat = async () => {
     if (!ciziliAlan || ciziliAlan.length < 3) {
       setHata('Önce haritada sol üstteki poligon/dikdörtgen aracıyla bir alan çiz.');
       return;
     }
     setYukleniyor(true);
+    setSonucGorunur(true);
     setHata(null);
     setSonuc(null);
+    setAsama('uyduGeliyor');
 
     try {
       const { data: kayit, error: eklemeHatasi } = await supabase
@@ -146,6 +152,10 @@ function AnaUygulama({ oturum, rol }) {
         .single();
 
       if (eklemeHatasi) throw eklemeHatasi;
+
+      // Uydunun konuma "yaklaştığı" animasyonu bir süre göster, sonra tarama evresine geç
+      await beklet(1800);
+      setAsama('taraniyor');
 
       const yanit = await fetch('/api/analyze', {
         method: 'POST',
@@ -162,13 +172,20 @@ function AnaUygulama({ oturum, rol }) {
         throw new Error(cevap.hata || 'Analiz sırasında bilinmeyen bir hata oluştu.');
       }
 
+      if (cevap.kayit_hatasi) {
+        setHata('Sonuç ekranda gösteriliyor ama veritabanına KAYDEDİLEMEDİ: ' + cevap.kayit_hatasi);
+      }
+
       setSonuc(cevap.sonuc);
+      setAsama('tamamlandı');
       gecmisiYukle();
+      await beklet(1400);
     } catch (e) {
       console.error(e);
       setHata(e.message || String(e));
     } finally {
       setYukleniyor(false);
+      setAsama('boşta');
     }
   };
 
@@ -237,13 +254,13 @@ function AnaUygulama({ oturum, rol }) {
         <div style={{ width: '320px', background: '#0f172a', color: 'white', padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           <h2 style={{ marginTop: 0, fontSize: '18px' }}>Uydu Alterasyon Taraması</h2>
           <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.4 }}>
-            Haritada sol üstteki araçlarla bir alan çiz, ardından "Analiz Et" butonuna bas.
+            Haritada sol üstteki araçlarla bir alan çiz, ardından "Taramayı Başlat" butonuna bas.
             Sonuç, Sentinel-2 yüzey verisinden hesaplanan bir alterasyon anomalisidir;
             yer altı derinliği göstermez, sahada doğrulama gerektirir.
           </p>
 
           <button
-            onClick={analizEt}
+            onClick={taramayiBaslat}
             disabled={yukleniyor}
             style={{
               padding: '12px', marginTop: '10px', background: yukleniyor ? '#475569' : '#2563eb',
@@ -252,8 +269,20 @@ function AnaUygulama({ oturum, rol }) {
             }}
           >
             {yukleniyor && <span className="donen-ikon" style={{ display: 'inline-block', width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.4)', borderTopColor: 'white', borderRadius: '50%' }} />}
-            {yukleniyor ? 'Analiz Ediliyor...' : 'Analiz Et'}
+            {yukleniyor ? 'Taranıyor...' : 'Taramayı Başlat'}
           </button>
+
+          {sonuc && (
+            <button
+              onClick={() => setSonucGorunur((v) => !v)}
+              style={{
+                padding: '9px', marginTop: '8px', background: 'transparent', color: '#94a3b8',
+                border: '1px solid #334155', borderRadius: '8px', cursor: 'pointer', fontSize: '12px',
+              }}
+            >
+              {sonucGorunur ? 'Tarama Sonucunu Gizle' : 'Tarama Sonucunu Göster'}
+            </button>
+          )}
 
           {hata && (
             <div className="yumusak-giris" style={{ marginTop: '12px', padding: '10px', background: '#7f1d1d', borderRadius: '6px', fontSize: '12px' }}>
@@ -297,11 +326,27 @@ function AnaUygulama({ oturum, rol }) {
             <TileLayer url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxZoom={22} maxNativeZoom={20} />
             <KonumTespiti />
             <CizimAraci onAlanCizildi={alanCizildi} />
-            {sonuc && <GeoJSON key={JSON.stringify(sonuc).length} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} />}
+            {sonuc && sonucGorunur && <GeoJSON key={JSON.stringify(sonuc).length} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} />}
           </MapContainer>
 
-          {/* TARAMA ANİMASYONU */}
-          {yukleniyor && (
+          {/* EVRE 1: UYDU KONUMA YÖNELİYOR */}
+          {asama === 'uyduGeliyor' && (
+            <div style={{
+              position: 'absolute', inset: 0, background: 'rgba(2, 6, 23, 0.55)',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              zIndex: 2000, pointerEvents: 'none', overflow: 'hidden',
+            }}>
+              <div className="uydu-yolu">
+                <span style={{ fontSize: '34px' }}>🛰️</span>
+              </div>
+              <div className="nabiz-metin" style={{ color: 'white', fontSize: '14px', fontWeight: 600, marginTop: '10px' }}>
+                Uydu, seçilen konuma yönleniyor...
+              </div>
+            </div>
+          )}
+
+          {/* EVRE 2: TARAMA YAPILIYOR */}
+          {asama === 'taraniyor' && (
             <div style={{
               position: 'absolute', inset: 0, background: 'rgba(2, 6, 23, 0.55)',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -317,6 +362,18 @@ function AnaUygulama({ oturum, rol }) {
               <div style={{ color: '#94a3b8', fontSize: '12px', marginTop: '4px' }}>
                 Bu işlem alanın büyüklüğüne göre biraz sürebilir
               </div>
+            </div>
+          )}
+
+          {/* EVRE 3: TAMAMLANDI */}
+          {asama === 'tamamlandı' && (
+            <div className="yumusak-giris" style={{
+              position: 'absolute', inset: 0, background: 'rgba(2, 6, 23, 0.35)',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              zIndex: 2000, pointerEvents: 'none',
+            }}>
+              <div style={{ fontSize: '30px', marginBottom: '8px' }}>✅</div>
+              <div style={{ color: 'white', fontSize: '15px', fontWeight: 700 }}>Tarama Tamamlandı</div>
             </div>
           )}
         </div>

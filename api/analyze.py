@@ -148,14 +148,12 @@ def altin_anomali_vektor_uret(koordinatlar):
 
 def supabase_guncelle(kayit_id, alanlar, kullanici_token=None):
     if not (SUPABASE_URL and SUPABASE_KEY and kayit_id):
-        return
+        return "SUPABASE_URL/KEY veya kayit_id eksik"
     try:
-        requests.patch(
+        yanit = requests.patch(
             f"{SUPABASE_URL}/rest/v1/taramalar?id=eq.{kayit_id}",
             headers={
                 "apikey": SUPABASE_KEY,
-                # RLS kuralları auth.uid() kontrolü yaptığı için, anon key yerine
-                # isteği yapan kullanıcının kendi token'ıyla imzalıyoruz.
                 "Authorization": f"Bearer {kullanici_token or SUPABASE_KEY}",
                 "Content-Type": "application/json",
                 "Prefer": "return=minimal",
@@ -163,8 +161,11 @@ def supabase_guncelle(kayit_id, alanlar, kullanici_token=None):
             json=alanlar,
             timeout=10,
         )
-    except Exception:
-        pass
+        if yanit.status_code >= 300:
+            return f"Supabase PATCH hatası ({yanit.status_code}): {yanit.text[:300]}"
+        return None
+    except Exception as e:
+        return f"İstek hatası: {e}"
 
 
 class handler(BaseHTTPRequestHandler):
@@ -183,12 +184,16 @@ class handler(BaseHTTPRequestHandler):
             koordinatlar = veri['koordinatlar']
 
             geojson = altin_anomali_vektor_uret(koordinatlar)
-            supabase_guncelle(kayit_id, {"durum": "Tamamlandı", "sonuc": geojson}, kullanici_token)
+            kayit_hatasi = supabase_guncelle(kayit_id, {"durum": "Tamamlandı", "sonuc": geojson}, kullanici_token)
 
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps({"basarili": True, "sonuc": geojson}).encode())
+            self.wfile.write(json.dumps({
+                "basarili": True,
+                "sonuc": geojson,
+                "kayit_hatasi": kayit_hatasi,  # None ise kayıt başarılı demektir
+            }).encode())
 
         except Exception as e:
             supabase_guncelle(kayit_id, {"durum": "Hata", "hata_mesaji": str(e)}, kullanici_token)
