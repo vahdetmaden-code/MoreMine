@@ -32,9 +32,10 @@ def altin_anomali_vektor_uret(koordinatlar):
     kord_listesi = [[k['lng'], k['lat']] for k in koordinatlar]
     aoi = ee.Geometry.Polygon([kord_listesi])
 
+    # Son ~18 ay içindeki, bulut oranı düşük Sentinel-2 görüntülerinin medyan bileşimi.
     s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
         .filterBounds(aoi) \
-        .filterDate('2024-01-01', '2025-12-31') \
+        .filterDate('2025-01-01', '2026-07-04') \
         .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 40))
 
     def maskS2(image):
@@ -46,21 +47,32 @@ def altin_anomali_vektor_uret(koordinatlar):
             ['B2', 'B3', 'B4', 'B8', 'B8A', 'B11', 'B12']
         ).divide(10000)
 
-    img = s2.map(maskS2).median().clip(aoi)
+    # ÖNEMLİ DÜZELTME: tüm bantları tek, sabit 10 metrelik bir ızgaraya oturtuyoruz.
+    # Farklı çözünürlükteki bantları (10m / 20m) hizasız bırakmak, önceki denemede
+    # gördüğün o anlamsız derecede büyük/kaba kareleri üretiyordu.
+    ORTAK_CRS = 'EPSG:3857'
+    ORTAK_OLCEK = 10
 
-    blue, red = img.select('B2'), img.select('B4')
+    img = s2.map(maskS2).median().clip(aoi) \
+        .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
+
+    blue, green, red = img.select('B2'), img.select('B3'), img.select('B4')
     nir, nir8a = img.select('B8'), img.select('B8A')
     swir1, swir2 = img.select('B11'), img.select('B12')
 
-    # --- Maskeler: su / bitki / yerleşim ---
+    # --- Maskeler: su / bitki / yerleşim (daha sıkı) ---
     ndvi = img.normalizedDifference(['B8', 'B4'])
     mndwi = img.normalizedDifference(['B3', 'B11'])
     ndbi = swir1.subtract(nir).divide(swir1.add(nir).add(0.0001))
+    parlaklik = blue.add(green).add(red).divide(3)
 
-    suMaskesi = mndwi.gt(0.2)
-    bitkiMaskesi = ndvi.gt(0.45)
-    yerlesimMaskesi = ndbi.gt(0.15).And(ndvi.lt(0.2))
-    gecerliMaske = suMaskesi.Or(bitkiMaskesi).Or(yerlesimMaskesi).Not()
+    suMaskesi = mndwi.gt(0.15)
+    bitkiMaskesi = ndvi.gt(0.30)
+    yerlesimMaskesi = ndbi.gt(0.05).And(ndvi.lt(0.25))
+    # Çatı/beton/asfalt gibi çok parlak ve bitkisiz yüzeyler için ek güvenlik
+    parlakYuzeyMaskesi = parlaklik.gt(0.22).And(ndvi.lt(0.25))
+
+    gecerliMaske = suMaskesi.Or(bitkiMaskesi).Or(yerlesimMaskesi).Or(parlakYuzeyMaskesi).Not()
 
     # --- Altın ile ilişkili alterasyon indeksleri ---
     demirOksit = red.divide(blue.add(0.0001))
@@ -70,7 +82,7 @@ def altin_anomali_vektor_uret(koordinatlar):
     def adaptifNormalize(image, band_adi):
         stats = image.updateMask(gecerliMaske).reduceRegion(
             reducer=ee.Reducer.percentile([5, 95]),
-            geometry=aoi, scale=20, maxPixels=1e9, bestEffort=True
+            geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK, maxPixels=1e10, bestEffort=True
         )
         p5 = ee.Number(stats.get(band_adi + '_p5'))
         p95 = ee.Number(stats.get(band_adi + '_p95'))
@@ -83,13 +95,13 @@ def altin_anomali_vektor_uret(koordinatlar):
 
     skor = d.multiply(0.40).add(k.multiply(0.40)).add(f.multiply(0.20)).updateMask(gecerliMaske)
 
-    # Güçlü yumuşatma -> pürüzsüz kontur sınırları için
-    skorPuruzsuz = skor.focal_median(radius=2.5, kernelType='circle', units='pixels') \
-        .reproject(crs='EPSG:4326', scale=30)
+    # Gürültü azaltma: artık net metre cinsinden, ortak ızgaraya oturmuş bir yarıçap
+    skorPuruzsuz = skor.focal_median(radius=15, units='meters', kernelType='circle') \
+        .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
 
     stats2 = skorPuruzsuz.reduceRegion(
         reducer=ee.Reducer.percentile([50, 75, 90, 97]),
-        geometry=aoi, scale=30, maxPixels=1e9, bestEffort=True
+        geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK, maxPixels=1e10, bestEffort=True
     )
     bandAdi = skorPuruzsuz.bandNames().get(0)
     e50 = ee.Number(stats2.get(ee.String(bandAdi).cat('_p50')))
@@ -104,22 +116,25 @@ def altin_anomali_vektor_uret(koordinatlar):
         .where(skorPuruzsuz.gt(e97), 4) \
         .updateMask(gecerliMaske) \
         .rename('sinif') \
-        .toInt()
+        .toInt() \
+        .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
 
     # --- PİKSEL DEĞİL, VEKTÖR POLİGON ÇIKTISI ---
     vektorler = siniflandirilmis.reduceToVectors(
         geometry=aoi,
-        scale=30,
+        crs=ORTAK_CRS,
+        scale=ORTAK_OLCEK,
         geometryType='polygon',
         labelProperty='sinif',
         reducer=ee.Reducer.countEvery(),
-        maxPixels=1e9,
+        maxPixels=1e10,
         bestEffort=True,
         eightConnected=True,
+        tileScale=4,
     )
 
     def kenariYumusat(f):
-        return f.setGeometry(f.geometry().simplify(15))
+        return f.setGeometry(f.geometry().simplify(8))
 
     vektorler = vektorler.map(kenariYumusat)
 

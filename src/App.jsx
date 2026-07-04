@@ -148,6 +148,7 @@ export default function App() {
 
   const gecmisTaramayiAc = async (id) => {
     setHata(null);
+    setSonuc(null);
     const { data, error } = await supabase
       .from('taramalar')
       .select('sonuc, durum, hata_mesaji')
@@ -159,7 +160,11 @@ export default function App() {
       return;
     }
     if (data.durum === 'Hata') {
-      setHata('Bu tarama hatayla sonuçlanmıştı: ' + (data.hata_mesaji || ''));
+      setHata('Bu tarama hatayla sonuçlanmıştı: ' + (data.hata_mesaji || 'Detay yok.'));
+      return;
+    }
+    if (data.durum !== 'Tamamlandı' || !data.sonuc) {
+      setHata('Bu tarama tamamlanmamış görünüyor (muhtemelen eski, yarıda kalmış bir deneme). Silip yeniden deneyebilirsin.');
       return;
     }
     setSonuc(data.sonuc);
