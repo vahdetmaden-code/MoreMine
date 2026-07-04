@@ -103,14 +103,17 @@ def altin_anomali_vektor_uret(koordinatlar):
     ndvi = img.normalizedDifference(['B8', 'B4'])
     mndwi = img.normalizedDifference(['B3', 'B11'])
     ndbi = swir1.subtract(nir).divide(swir1.add(nir).add(0.0001))
-    parlaklik = blue.add(green).add(red).divide(3)
 
     suMaskesi = mndwi.gt(0.15)
     bitkiMaskesi = ndvi.gt(0.30)
-    yerlesimMaskesi = ndbi.gt(0.05).And(ndvi.lt(0.25))
-    parlakYuzeyMaskesi = parlaklik.gt(0.22).And(ndvi.lt(0.25))
+    # NOT: Sadece "çok parlak" olmayı yerleşim/beton sayan bir maske BİLEREK
+    # kaldırıldı — taş ocağı, dolgu alanı, çıplak kayalık gibi tam da bu aracın
+    # analiz etmesi gereken yüzeyler de parlak olabiliyor ve yanlışlıkla
+    # "Analiz Dışı" işaretleniyordu. Yerleşim tespiti artık sadece NDBI'a
+    # (yapılaşma indeksine) dayanıyor, eşiği de daha az agresif.
+    yerlesimMaskesi = ndbi.gt(0.15).And(ndvi.lt(0.2))
 
-    gecerliMaske = suMaskesi.Or(bitkiMaskesi).Or(yerlesimMaskesi).Or(parlakYuzeyMaskesi).Not()
+    gecerliMaske = suMaskesi.Or(bitkiMaskesi).Or(yerlesimMaskesi).Not()
 
     # Bu alanda hiç analiz edilebilir (çıplak toprak/kaya) piksel kalmış mı diye kontrol et.
     # Kontrol etmezsek, tamamen orman/su/yerleşim olan bir alanda Earth Engine null
