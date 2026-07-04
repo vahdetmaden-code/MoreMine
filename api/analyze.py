@@ -117,16 +117,37 @@ def altin_anomali_vektor_uret(koordinatlar):
     # Bu alanda hiç analiz edilebilir (çıplak toprak/kaya) piksel kalmış mı diye kontrol et.
     # Kontrol etmezsek, tamamen orman/su/yerleşim olan bir alanda Earth Engine null
     # değerler üzerinde işlem yapmaya çalışıp anlaşılmaz bir hatayla çöküyor.
+    # --- TEŞHİS: hangi maskenin ne kadar alanı kapladığını ayrı ayrı say ---
+    # (Bu sayılar aynı bölgede art arda "veri yok" hatası almaya devam edersek
+    # kör tahmin yerine kesin sebebi görmek için eklendi.)
+    toplam_sayim = ndvi.rename('t').reduceRegion(
+        reducer=ee.Reducer.count(), geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK,
+        maxPixels=1e10, bestEffort=True, tileScale=4,
+    )
+    su_sayim = suMaskesi.selfMask().rename('s').reduceRegion(
+        reducer=ee.Reducer.count(), geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK,
+        maxPixels=1e10, bestEffort=True, tileScale=4,
+    )
+    bitki_sayim = bitkiMaskesi.selfMask().rename('b').reduceRegion(
+        reducer=ee.Reducer.count(), geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK,
+        maxPixels=1e10, bestEffort=True, tileScale=4,
+    )
+    toplam_piksel = toplam_sayim.get('t').getInfo() or 0
+    su_piksel = su_sayim.get('s').getInfo() or 0
+    bitki_piksel = bitki_sayim.get('b').getInfo() or 0
+
     gecerli_sayim = gecerliMaske.selfMask().reduceRegion(
         reducer=ee.Reducer.count(),
         geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK, maxPixels=1e10, bestEffort=True, tileScale=4,
     )
-    gecerli_piksel_adedi = list(gecerli_sayim.getInfo().values())[0] or 0
+    gecerli_piksel_adedi = list(gecerli_sayim.getInfo().values())[0] if gecerli_sayim.getInfo() else 0
     if gecerli_piksel_adedi < 15:
         raise RuntimeError(
-            "Bu alanda analiz edilebilecek çıplak toprak/kaya yüzeyi bulunamadı "
-            "(alan neredeyse tamamen orman, su veya yerleşim olarak görünüyor). "
-            "Lütfen daha açık/çıplak arazi içeren bir alan seç."
+            "TEŞHİS BİLGİSİ -> "
+            f"toplam piksel (bulut/veri maskesinden geçen): {toplam_piksel}, "
+            f"su sayılan: {su_piksel}, bitki sayılan: {bitki_piksel}, "
+            f"geçerli (analiz edilebilir): {gecerli_piksel_adedi}. "
+            "Bu sayılara göre hangi maskenin/veri eksikliğinin sorumlu olduğunu tespit edeceğiz."
         )
 
     # --- Altın ile ilişkili alterasyon indeksleri ---
