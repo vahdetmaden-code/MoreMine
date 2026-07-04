@@ -82,7 +82,10 @@ function HaritaOdakla({ hedef }) {
   useEffect(() => {
     if (!hedef || hedef.length < 3) return;
     const sinirlar = L.latLngBounds(hedef.map((k) => [k.lat, k.lng]));
-    map.flyToBounds(sinirlar, { duration: 1.2, padding: [40, 40] });
+    const zamanlayici = setTimeout(() => {
+      map.flyToBounds(sinirlar, { duration: 1.2, padding: [40, 40] });
+    }, 80);
+    return () => clearTimeout(zamanlayici);
   }, [hedef, map]);
   return null;
 }

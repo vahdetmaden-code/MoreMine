@@ -105,7 +105,7 @@ def altin_anomali_vektor_uret(koordinatlar):
     ndbi = swir1.subtract(nir).divide(swir1.add(nir).add(0.0001))
 
     suMaskesi = mndwi.gt(0.15)
-    bitkiMaskesi = ndvi.gt(0.30)
+    bitkiMaskesi = ndvi.gt(0.25)
     # NOT: Sadece "çok parlak" olmayı yerleşim/beton sayan bir maske BİLEREK
     # kaldırıldı — taş ocağı, dolgu alanı, çıplak kayalık gibi tam da bu aracın
     # analiz etmesi gereken yüzeyler de parlak olabiliyor ve yanlışlıkla
