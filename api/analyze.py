@@ -39,7 +39,7 @@ def kullanici_bilgisini_al(kullanici_token):
     kullanici_id = kullanici_yaniti.json().get("id")
 
     profil_yaniti = requests.get(
-        f"{SUPABASE_URL}/rest/v1/profiller?id=eq.{kullanici_id}&select=aktif,tarama_limiti",
+        f"{SUPABASE_URL}/rest/v1/profiller?id=eq.{kullanici_id}&select=aktif,tarama_limiti,rol",
         headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {kullanici_token}"},
         timeout=8,
     )
@@ -66,21 +66,23 @@ def limit_kontrolu_yap(kullanici_id, tarama_limiti, kullanici_token, hariç_id):
         raise RuntimeError(f"Tarama limitine ulaştın ({tarama_limiti}). Daha fazla tarama için yöneticinle iletişime geç.")
 
 
-def altin_anomali_vektor_uret(koordinatlar):
+def altin_anomali_vektor_uret(koordinatlar, ozel_baslangic=None, ozel_bitis=None):
     gee_baslat()
 
     kord_listesi = [[k['lng'], k['lat']] for k in koordinatlar]
     aoi = ee.Geometry.Polygon([kord_listesi])
 
-    # ÖNEMLİ DÜZELTME (2. sürüm): Önceki "90 gün yetmezse 6 aya atla" mantığı
-    # ANİ ve TUTARSIZ sonuçlara yol açıyordu — sınırda bir görüntü daha/az
-    # bulununca sistem aniden bambaşka bir görüntü setine geçip sınıflandırmayı
-    # baştan aşağı değiştiriyordu. Artık TEK ve SABİT bir kural var: her zaman
-    # son 6 aylık pencereden, bulut oranına göre EN TEMİZ 10 görüntü seçiliyor.
-    # Bu, hem güncel hem de gün be gün tutarlı bir sonuç verir.
-    bugun = datetime.utcnow()
-    baslangic_tarihi = (bugun - timedelta(days=180)).strftime('%Y-%m-%d')
-    bitis_tarihi = (bugun + timedelta(days=1)).strftime('%Y-%m-%d')
+    # Varsayılan: her zaman son 6 aylık pencereden, bulut oranına göre en temiz
+    # 10 görüntü. Kullanıcı isterse (ozel_baslangic/ozel_bitis) bunun yerine
+    # BELİRLİ bir tarih aralığını sabitleyebilir -> aynı taramayı istediği zaman
+    # birebir tekrar üretebilir.
+    if ozel_baslangic and ozel_bitis:
+        baslangic_tarihi = ozel_baslangic
+        bitis_tarihi = ozel_bitis
+    else:
+        bugun = datetime.utcnow()
+        baslangic_tarihi = (bugun - timedelta(days=180)).strftime('%Y-%m-%d')
+        bitis_tarihi = (bugun + timedelta(days=1)).strftime('%Y-%m-%d')
 
     s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
         .filterBounds(aoi) \
@@ -88,6 +90,14 @@ def altin_anomali_vektor_uret(koordinatlar):
         .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 70)) \
         .sort('CLOUDY_PIXEL_PERCENTAGE') \
         .limit(10)
+
+    # Bu taramada gerçekte hangi Sentinel-2 görüntülerinin (hangi tarihlerin)
+    # kullanıldığını kaydediyoruz ki ileride "hangi veriyle üretildi" sorusu
+    # havada kalmasın ve istenirse aynı tarih aralığı tekrar seçilebilsin.
+    zaman_damgalari = s2.aggregate_array('system:time_start').getInfo()
+    kullanilan_tarihler = sorted({
+        datetime.utcfromtimestamp(t / 1000).strftime('%Y-%m-%d') for t in zaman_damgalari
+    })
 
     def maskS2(image):
         scl = image.select('SCL')
@@ -238,7 +248,7 @@ def altin_anomali_vektor_uret(koordinatlar):
 
     vektorler = vektorler.map(kenariYumusat)
 
-    return vektorler.getInfo()
+    return vektorler.getInfo(), kullanilan_tarihler
 
 
 def supabase_guncelle(kayit_id, alanlar, kullanici_token=None):
@@ -277,6 +287,8 @@ class handler(BaseHTTPRequestHandler):
             veri = json.loads(body)
             kayit_id = veri.get('id')
             koordinatlar = veri['koordinatlar']
+            ozel_baslangic = veri.get('ozel_baslangic')
+            ozel_bitis = veri.get('ozel_bitis')
 
             if not kullanici_token:
                 raise RuntimeError("Oturum bilgisi eksik, lütfen tekrar giriş yap.")
@@ -286,8 +298,21 @@ class handler(BaseHTTPRequestHandler):
                 raise RuntimeError("Hesabın devre dışı bırakılmış. Yöneticinle iletişime geç.")
             limit_kontrolu_yap(kullanici_id, profil.get('tarama_limiti'), kullanici_token, kayit_id)
 
-            geojson = altin_anomali_vektor_uret(koordinatlar)
-            kayit_hatasi = supabase_guncelle(kayit_id, {"durum": "Tamamlandı", "sonuc": geojson}, kullanici_token)
+            # Tarih aralığını sabitleme SADECE admin yetkisiyle kullanılabilir.
+            # Arayüzde gizlenmiş olsa da, biri isteği doğrudan değiştirip göndermeye
+            # çalışırsa burada sunucu tarafında da engellenir.
+            if profil.get('rol') != 'admin':
+                ozel_baslangic = None
+                ozel_bitis = None
+
+            geojson, kullanilan_tarihler = altin_anomali_vektor_uret(koordinatlar, ozel_baslangic, ozel_bitis)
+            kayit_hatasi = supabase_guncelle(kayit_id, {
+                "durum": "Tamamlandı",
+                "sonuc": geojson,
+                "kullanilan_tarihler": kullanilan_tarihler,
+                "ozel_tarih_baslangic": ozel_baslangic,
+                "ozel_tarih_bitis": ozel_bitis,
+            }, kullanici_token)
 
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
@@ -295,6 +320,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({
                 "basarili": True,
                 "sonuc": geojson,
+                "kullanilan_tarihler": kullanilan_tarihler,
                 "kayit_hatasi": kayit_hatasi,  # None ise kayıt başarılı demektir
             }).encode())
 

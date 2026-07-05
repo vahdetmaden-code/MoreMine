@@ -91,7 +91,7 @@ function HaritaOdakla({ hedef }) {
 }
 
 // Sayfa açıldığında kullanıcının konumunu bulup haritayı oraya götüren bileşen
-function KonumTespiti() {
+function KonumTespiti({ tetikleyici }) {
   const map = useMap();
 
   useEffect(() => {
@@ -105,7 +105,7 @@ function KonumTespiti() {
       },
       { enableHighAccuracy: false, timeout: 8000 }
     );
-  }, [map]);
+  }, [map, tetikleyici]);
 
   return null;
 }
@@ -120,6 +120,11 @@ function AnaUygulama({ oturum, rol }) {
   const [detayAsamasi, setDetayAsamasi] = useState(0);
   const [hata, setHata] = useState(null);
   const [gecmis, setGecmis] = useState([]);
+  const [konumTetikleyici, setKonumTetikleyici] = useState(0);
+  const [tarihSabitle, setTarihSabitle] = useState(false);
+  const [ozelBaslangic, setOzelBaslangic] = useState('');
+  const [ozelBitis, setOzelBitis] = useState('');
+  const [sonKullanilanTarihler, setSonKullanilanTarihler] = useState(null);
   const [adminPaneliAcik, setAdminPaneliAcik] = useState(false);
   const ciziliKatmanRef = useRef(null);
 
@@ -200,7 +205,11 @@ function AnaUygulama({ oturum, rol }) {
 
       const { data: kayit, error: eklemeHatasi } = await supabase
         .from('taramalar')
-        .insert({ koordinatlar: ciziliAlan, durum: 'İşleniyor', kullanici_id: oturum.user.id, konum_adi: konumAdi })
+        .insert({
+          koordinatlar: ciziliAlan, durum: 'İşleniyor', kullanici_id: oturum.user.id, konum_adi: konumAdi,
+          ozel_tarih_baslangic: tarihSabitle && ozelBaslangic ? ozelBaslangic : null,
+          ozel_tarih_bitis: tarihSabitle && ozelBitis ? ozelBitis : null,
+        })
         .select()
         .single();
 
@@ -216,7 +225,12 @@ function AnaUygulama({ oturum, rol }) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${oturum.access_token}`,
         },
-        body: JSON.stringify({ id: kayit.id, koordinatlar: ciziliAlan }),
+        body: JSON.stringify({
+          id: kayit.id,
+          koordinatlar: ciziliAlan,
+          ozel_baslangic: tarihSabitle && ozelBaslangic ? ozelBaslangic : null,
+          ozel_bitis: tarihSabitle && ozelBitis ? ozelBitis : null,
+        }),
       });
 
       const cevap = await yanit.json();
@@ -230,6 +244,7 @@ function AnaUygulama({ oturum, rol }) {
       }
 
       setSonuc(cevap.sonuc);
+      setSonKullanilanTarihler(cevap.kullanilan_tarihler || null);
       setAsama('tamamlandı');
       gecmisiYukle();
       await beklet(1400);
@@ -323,6 +338,17 @@ function AnaUygulama({ oturum, rol }) {
           <h2 style={{ marginTop: 0, fontSize: '18px' }}>Uydu Alterasyon Taraması</h2>
 
           <button
+            onClick={() => setKonumTetikleyici((v) => v + 1)}
+            style={{
+              padding: '9px', marginTop: '10px', background: 'transparent', color: '#94a3b8',
+              border: '1px solid #334155', borderRadius: '8px', cursor: 'pointer', fontSize: '12px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+            }}
+          >
+            📍 Konumuma Git
+          </button>
+
+          <button
             onClick={taramayiBaslat}
             disabled={yukleniyor}
             style={{
@@ -345,6 +371,35 @@ function AnaUygulama({ oturum, rol }) {
             >
               {sonucGorunur ? 'Tarama Sonucunu Gizle' : 'Tarama Sonucunu Göster'}
             </button>
+          )}
+
+          {/* TARİH SABİTLEME (sadece admin) */}
+          {rol === 'admin' && (
+          <div style={{ marginTop: '14px', borderTop: '1px solid #334155', paddingTop: '12px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#94a3b8', cursor: 'pointer' }}>
+              <input type="checkbox" checked={tarihSabitle} onChange={(e) => setTarihSabitle(e.target.checked)} />
+              Tarih aralığını sabitle (admin)
+            </label>
+            {tarihSabitle && (
+              <div className="yumusak-giris" style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <input
+                  type="date" value={ozelBaslangic} onChange={(e) => setOzelBaslangic(e.target.value)}
+                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '12px' }}
+                />
+                <input
+                  type="date" value={ozelBitis} onChange={(e) => setOzelBitis(e.target.value)}
+                  style={{ padding: '7px', borderRadius: '6px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '12px' }}
+                />
+                <div style={{ fontSize: '10px', color: '#64748b' }}>Boş bırakılırsa varsayılan (son 6 ay, en temiz 10 görüntü) kullanılır.</div>
+              </div>
+            )}
+          </div>
+          )}
+
+          {sonKullanilanTarihler && sonKullanilanTarihler.length > 0 && (
+            <div style={{ marginTop: '10px', fontSize: '11px', color: '#64748b' }}>
+              Kullanılan görüntü tarihleri: {sonKullanilanTarihler.join(', ')}
+            </div>
           )}
 
           {hata && (
@@ -383,13 +438,15 @@ function AnaUygulama({ oturum, rol }) {
                     {t.durum}
                   </div>
                 </div>
-                <button
-                  onClick={(e) => gecmisTaramaSil(t.id, e)}
-                  title="Sil"
-                  style={{ flexShrink: 0, background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '14px', padding: '2px 4px' }}
-                >
-                  🗑
-                </button>
+                {rol === 'admin' && (
+                  <button
+                    onClick={(e) => gecmisTaramaSil(t.id, e)}
+                    title="Sil"
+                    style={{ flexShrink: 0, background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '14px', padding: '2px 4px' }}
+                  >
+                    🗑
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -399,7 +456,7 @@ function AnaUygulama({ oturum, rol }) {
         <div style={{ flex: 1, position: 'relative' }}>
           <MapContainer center={[40.97, 29.06]} zoom={14} style={{ height: '100%', width: '100%' }}>
             <TileLayer url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxZoom={22} maxNativeZoom={20} />
-            <KonumTespiti />
+            <KonumTespiti tetikleyici={konumTetikleyici} />
             <HaritaOdakla hedef={odaklanilacakAlan} />
             <CizimAraci onAlanCizildi={alanCizildi} />
             {sonuc && sonucGorunur && <GeoJSON key={JSON.stringify(sonuc).length} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} />}
