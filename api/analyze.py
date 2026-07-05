@@ -102,7 +102,7 @@ def altin_anomali_vektor_uret(koordinatlar):
     # Farklı çözünürlükteki bantları (10m / 20m) hizasız bırakmak, önceki denemede
     # gördüğün o anlamsız derecede büyük/kaba kareleri üretiyordu.
     ORTAK_CRS = 'EPSG:3857'
-    ORTAK_OLCEK = 15  # Hız/detay dengesi için 15m (Sentinel-2 SWIR bantlarının gerçek çözünürlüğüne yakın)
+    ORTAK_OLCEK = 10  # Daha küçük/detaylı bölgeler için Sentinel-2'nin en ince çözünürlüğüne çekildi
 
     img = s2.map(maskS2).median().clip(aoi) \
         .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
@@ -189,7 +189,7 @@ def altin_anomali_vektor_uret(koordinatlar):
 
     skor = d.multiply(0.40).add(k.multiply(0.40)).add(f.multiply(0.20)).updateMask(gecerliMaske)
 
-    skorPuruzsuz = skor.focal_median(radius=15, units='meters', kernelType='circle') \
+    skorPuruzsuz = skor.focal_median(radius=10, units='meters', kernelType='circle') \
         .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
 
     stats2 = skorPuruzsuz.reduceRegion(
@@ -228,7 +228,7 @@ def altin_anomali_vektor_uret(koordinatlar):
     )
 
     def kenariYumusat(f):
-        return f.setGeometry(f.geometry().simplify(8))
+        return f.setGeometry(f.geometry().simplify(5))
 
     vektorler = vektorler.map(kenariYumusat)
 
