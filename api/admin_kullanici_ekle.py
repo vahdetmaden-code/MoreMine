@@ -54,6 +54,9 @@ class handler(BaseHTTPRequestHandler):
             eposta = veri['eposta']
             sifre = veri['sifre']
             tarama_limiti = veri.get('tarama_limiti')  # None = sınırsız
+            rol = veri.get('rol', 'kullanici')
+            if rol not in ('kullanici', 'admin'):
+                rol = 'kullanici'
 
             olusturma_yaniti = requests.post(
                 f"{SUPABASE_URL}/auth/v1/admin/users",
@@ -71,19 +74,18 @@ class handler(BaseHTTPRequestHandler):
 
             yeni_kullanici_id = olusturma_yaniti.json().get("id")
 
-            # tarama_limiti'ni profile yaz (profil satırı trigger ile zaten otomatik oluştu)
-            if tarama_limiti is not None:
-                requests.patch(
-                    f"{SUPABASE_URL}/rest/v1/profiller?id=eq.{yeni_kullanici_id}",
-                    headers={
-                        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-                        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-                        "Content-Type": "application/json",
-                        "Prefer": "return=minimal",
-                    },
-                    json={"tarama_limiti": tarama_limiti},
-                    timeout=10,
-                )
+            # tarama_limiti ve rol'ü profile yaz (profil satırı trigger ile zaten otomatik oluştu)
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/profiller?id=eq.{yeni_kullanici_id}",
+                headers={
+                    "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal",
+                },
+                json={"tarama_limiti": tarama_limiti, "rol": rol},
+                timeout=10,
+            )
 
             self.send_response(200)
             self.send_header('Content-type', 'application/json')

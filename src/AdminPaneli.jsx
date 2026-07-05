@@ -12,6 +12,7 @@ export default function AdminPaneli({ onKapat }) {
   const [yeniEposta, setYeniEposta] = useState('');
   const [yeniSifre, setYeniSifre] = useState('');
   const [yeniLimit, setYeniLimit] = useState('');
+  const [yeniRol, setYeniRol] = useState('kullanici');
   const [ekleniyor, setEkleniyor] = useState(false);
 
   const veriYukle = async () => {
@@ -68,6 +69,7 @@ export default function AdminPaneli({ onKapat }) {
           eposta: yeniEposta,
           sifre: yeniSifre,
           tarama_limiti: yeniLimit === '' ? null : parseInt(yeniLimit, 10),
+          rol: yeniRol,
         }),
       });
       const cevap = await yanit.json();
@@ -77,6 +79,7 @@ export default function AdminPaneli({ onKapat }) {
       setYeniEposta('');
       setYeniSifre('');
       setYeniLimit('');
+      setYeniRol('kullanici');
       veriYukle();
     } catch (err) {
       setHata(err.message || String(err));
@@ -168,8 +171,16 @@ export default function AdminPaneli({ onKapat }) {
               <label style={{ color: '#94a3b8', fontSize: '12px' }}>Tarama Limiti (boş = sınırsız)</label>
               <input
                 type="number" min="0" value={yeniLimit} onChange={(e) => setYeniLimit(e.target.value)}
-                style={{ width: '100%', padding: '10px', marginTop: '4px', marginBottom: '18px', borderRadius: '8px', border: '1px solid #334155', background: '#1e293b', color: 'white' }}
+                style={{ width: '100%', padding: '10px', marginTop: '4px', marginBottom: '14px', borderRadius: '8px', border: '1px solid #334155', background: '#1e293b', color: 'white' }}
               />
+              <label style={{ color: '#94a3b8', fontSize: '12px' }}>Rol</label>
+              <select
+                value={yeniRol} onChange={(e) => setYeniRol(e.target.value)}
+                style={{ width: '100%', padding: '10px', marginTop: '4px', marginBottom: '18px', borderRadius: '8px', border: '1px solid #334155', background: '#1e293b', color: 'white' }}
+              >
+                <option value="kullanici">Kullanıcı</option>
+                <option value="admin">Admin</option>
+              </select>
               <button type="submit" disabled={ekleniyor} style={{ width: '100%', padding: '11px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: ekleniyor ? 'default' : 'pointer', fontSize: '14px' }}>
                 {ekleniyor ? 'Ekleniyor...' : 'Kullanıcı Oluştur'}
               </button>
