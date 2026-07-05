@@ -189,7 +189,7 @@ def altin_anomali_vektor_uret(koordinatlar):
 
     skor = d.multiply(0.40).add(k.multiply(0.40)).add(f.multiply(0.20)).updateMask(gecerliMaske)
 
-    skorPuruzsuz = skor.focal_median(radius=10, units='meters', kernelType='circle') \
+    skorPuruzsuz = skor.focal_median(radius=25, units='meters', kernelType='circle') \
         .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
 
     stats2 = skorPuruzsuz.reduceRegion(
@@ -228,7 +228,13 @@ def altin_anomali_vektor_uret(koordinatlar):
     )
 
     def kenariYumusat(f):
-        return f.setGeometry(f.geometry().simplify(5))
+        # Önce basitleştir, sonra köşeleri yuvarlatmak için "şişirip-söndür"
+        # (buffer +X sonra -X) tekniği uygula. Bu, piksel kutularının keskin,
+        # dik açılı köşelerini gerçek bir kontur haritasındaki gibi
+        # yuvarlak/organik eğrilere dönüştürür.
+        g = f.geometry().simplify(5)
+        g = g.buffer(18).simplify(5).buffer(-18).simplify(5)
+        return f.setGeometry(g)
 
     vektorler = vektorler.map(kenariYumusat)
 
