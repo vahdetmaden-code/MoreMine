@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from './supabaseClient';
 
 export default function AdminPaneli({ onKapat }) {
@@ -8,6 +8,8 @@ export default function AdminPaneli({ onKapat }) {
   const [yukleniyor, setYukleniyor] = useState(true);
   const [hata, setHata] = useState(null);
   const [basari, setBasari] = useState(null);
+  const limitInputRefs = useRef({});
+  const [kaydedilenId, setKaydedilenId] = useState(null);
 
   const [yeniEposta, setYeniEposta] = useState('');
   const [yeniSifre, setYeniSifre] = useState('');
@@ -50,6 +52,8 @@ export default function AdminPaneli({ onKapat }) {
     const { error } = await supabase.from('profiller').update({ tarama_limiti: sayi }).eq('id', id);
     if (error) { setHata(error.message); return; }
     setKullanicilar((liste) => liste.map((k) => (k.id === id ? { ...k, tarama_limiti: sayi } : k)));
+    setKaydedilenId(id);
+    setTimeout(() => setKaydedilenId((v) => (v === id ? null : v)), 1500);
   };
 
   const kullaniciEkle = async (e) => {
@@ -131,12 +135,20 @@ export default function AdminPaneli({ onKapat }) {
                       </span>
                     </td>
                     <td style={{ padding: '8px' }}>
-                      <input
-                        type="number" min="0" placeholder="Sınırsız"
-                        defaultValue={k.tarama_limiti ?? ''}
-                        onBlur={(e) => limitGuncelle(k.id, e.target.value)}
-                        style={{ width: '80px', padding: '5px 7px', borderRadius: '6px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '12px' }}
-                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <input
+                          type="number" min="0" placeholder="Sınırsız"
+                          ref={(el) => (limitInputRefs.current[k.id] = el)}
+                          defaultValue={k.tarama_limiti ?? ''}
+                          style={{ width: '70px', padding: '5px 7px', borderRadius: '6px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '12px' }}
+                        />
+                        <button
+                          onClick={() => limitGuncelle(k.id, limitInputRefs.current[k.id]?.value ?? '')}
+                          style={{ fontSize: '11px', background: kaydedilenId === k.id ? '#14532d' : '#334155', color: 'white', border: 'none', borderRadius: '6px', padding: '5px 9px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                        >
+                          {kaydedilenId === k.id ? '✓ Kaydedildi' : 'Kaydet'}
+                        </button>
+                      </div>
                     </td>
                     <td style={{ padding: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       {k.rol === 'admin' ? (
