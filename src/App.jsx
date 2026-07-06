@@ -5,6 +5,7 @@ import '@geoman-io/leaflet-geoman-free';
 import { supabase } from './supabaseClient';
 import Giris from './Giris';
 import AdminPaneli from './AdminPaneli';
+import Harita3D from './Harita3D';
 
 // Sınıf değerine göre renk (motor.py / api/analyze.py ile birebir aynı olmalı)
 const RENKLER = {
@@ -156,6 +157,7 @@ function AnaUygulama({ oturum, rol }) {
   const [gizlenenleriGoster, setGizlenenleriGoster] = useState(false);
   const merkezRef = useRef(null);
   const [adminPaneliAcik, setAdminPaneliAcik] = useState(false);
+  const [gorunum3D, setGorunum3D] = useState(false);
   const ciziliKatmanRef = useRef(null);
 
   const TARAMA_ASAMALARI = [
@@ -432,6 +434,7 @@ function AnaUygulama({ oturum, rol }) {
       </div>
 
       {adminPaneliAcik && <AdminPaneli onKapat={() => setAdminPaneliAcik(false)} />}
+      {gorunum3D && sonuc && <Harita3D sonuc={sonuc} onKapat={() => setGorunum3D(false)} />}
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         {/* SOL PANEL */}
@@ -522,6 +525,18 @@ function AnaUygulama({ oturum, rol }) {
               }}
             >
               {sonucGorunur ? 'Tarama Sonucunu Gizle' : 'Tarama Sonucunu Göster'}
+            </button>
+          )}
+
+          {sonuc && (
+            <button
+              onClick={() => setGorunum3D(true)}
+              style={{
+                padding: '9px', marginTop: '8px', background: 'transparent', color: '#94a3b8',
+                border: '1px solid #334155', borderRadius: '8px', cursor: 'pointer', fontSize: '12px',
+              }}
+            >
+              🧊 3D Görünüm
             </button>
           )}
 
