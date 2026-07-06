@@ -439,29 +439,44 @@ function AnaUygulama({ oturum, rol }) {
           <h2 style={{ marginTop: 0, fontSize: '18px' }}>Uydu Alterasyon Taraması</h2>
 
           {/* KONUM ARAMA */}
-          <form onSubmit={konumAra} style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-            <input
-              type="text" value={aramaMetni} onChange={(e) => setAramaMetni(e.target.value)}
-              placeholder="Konum ara (yer adı, adres...)"
-              style={{ flex: 1, padding: '9px', borderRadius: '8px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '12px' }}
-            />
-            <button type="submit" disabled={aramaYukleniyor} style={{ padding: '0 12px', borderRadius: '8px', border: 'none', background: '#334155', color: 'white', cursor: 'pointer', fontSize: '13px' }}>
-              🔍
-            </button>
-          </form>
-          {aramaSonuclari.length > 0 && (
-            <div className="yumusak-giris" style={{ marginTop: '6px', background: '#1e293b', borderRadius: '8px', overflow: 'hidden' }}>
-              {aramaSonuclari.map((s, i) => (
-                <div
-                  key={i}
-                  onClick={() => aramaSonucunaGit(s)}
-                  style={{ padding: '8px 10px', fontSize: '11px', cursor: 'pointer', borderBottom: i < aramaSonuclari.length - 1 ? '1px solid #334155' : 'none' }}
-                >
-                  {s.display_name}
-                </div>
-              ))}
-            </div>
-          )}
+          <div style={{ position: 'relative' }}>
+            <form onSubmit={konumAra} style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+              <input
+                type="text" value={aramaMetni} onChange={(e) => setAramaMetni(e.target.value)}
+                placeholder="Konum ara (yer adı, adres...)"
+                style={{ flex: 1, padding: '9px', borderRadius: '8px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '12px' }}
+              />
+              <button type="submit" disabled={aramaYukleniyor} style={{ padding: '0 12px', borderRadius: '8px', border: 'none', background: '#334155', color: 'white', cursor: 'pointer', fontSize: '13px' }}>
+                {aramaYukleniyor ? <span className="donen-ikon" style={{ display: 'inline-block', width: '12px', height: '12px', border: '2px solid rgba(255,255,255,0.4)', borderTopColor: 'white', borderRadius: '50%' }} /> : '🔍'}
+              </button>
+            </form>
+
+            {aramaSonuclari.length > 0 && (
+              <div
+                className="yumusak-giris"
+                style={{
+                  position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 500,
+                  background: '#1e293b', borderRadius: '8px', border: '1px solid #334155',
+                  maxHeight: '260px', overflowY: 'auto', boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                }}
+              >
+                {aramaSonuclari.map((s, i) => (
+                  <div
+                    key={i}
+                    onClick={() => aramaSonucunaGit(s)}
+                    style={{
+                      padding: '10px 12px', fontSize: '12px', lineHeight: 1.4, cursor: 'pointer',
+                      borderBottom: i < aramaSonuclari.length - 1 ? '1px solid #334155' : 'none',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#334155')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    {s.display_name}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           <button
             onClick={() => setKonumTetikleyici((v) => v + 1)}
