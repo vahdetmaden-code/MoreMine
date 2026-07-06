@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import '@geoman-io/leaflet-geoman-free';
 import { supabase } from './supabaseClient';
@@ -76,6 +76,29 @@ function CizimAraci({ onAlanCizildi }) {
   return null;
 }
 
+// Verilen tek bir noktaya (arama sonucu / favori konum) uçan yardımcı bileşen
+function NoktayaUc({ hedef }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!hedef) return;
+    map.flyTo([hedef.lat, hedef.lng], hedef.zoom || 15, { duration: 1.2 });
+  }, [hedef, map]);
+  return null;
+}
+
+// Haritanın o anki merkezini bir ref'te tutar (buton tıklamasında "şu anki konumu kaydet" için)
+function MerkezTakibi({ merkezRef }) {
+  const map = useMapEvents({
+    moveend: () => {
+      merkezRef.current = map.getCenter();
+    },
+  });
+  useEffect(() => {
+    merkezRef.current = map.getCenter();
+  }, [map]);
+  return null;
+}
+
 // Verilen koordinat setine haritayı odaklayan (uçarak giden) yardımcı bileşen
 function HaritaOdakla({ hedef }) {
   const map = useMap();
@@ -125,6 +148,13 @@ function AnaUygulama({ oturum, rol }) {
   const [ozelBaslangic, setOzelBaslangic] = useState('');
   const [ozelBitis, setOzelBitis] = useState('');
   const [sonKullanilanTarihler, setSonKullanilanTarihler] = useState(null);
+  const [aramaMetni, setAramaMetni] = useState('');
+  const [aramaSonuclari, setAramaSonuclari] = useState([]);
+  const [aramaYukleniyor, setAramaYukleniyor] = useState(false);
+  const [ucusHedefi, setUcusHedefi] = useState(null);
+  const [favoriler, setFavoriler] = useState([]);
+  const [gizlenenleriGoster, setGizlenenleriGoster] = useState(false);
+  const merkezRef = useRef(null);
   const [adminPaneliAcik, setAdminPaneliAcik] = useState(false);
   const ciziliKatmanRef = useRef(null);
 
@@ -138,15 +168,86 @@ function AnaUygulama({ oturum, rol }) {
   const gecmisiYukle = useCallback(async () => {
     const { data, error } = await supabase
       .from('taramalar')
-      .select('id, created_at, durum, koordinatlar, konum_adi')
+      .select('id, created_at, durum, koordinatlar, konum_adi, gizli')
       .order('created_at', { ascending: false })
-      .limit(20);
+      .limit(50);
     if (!error) setGecmis(data);
+  }, []);
+
+  const favorileriYukle = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('favori_konumlar')
+      .select('id, isim, lat, lng, created_at')
+      .order('created_at', { ascending: false });
+    if (!error) setFavoriler(data);
   }, []);
 
   useEffect(() => {
     gecmisiYukle();
-  }, [gecmisiYukle]);
+    favorileriYukle();
+  }, [gecmisiYukle, favorileriYukle]);
+
+  const konumAra = async (e) => {
+    e.preventDefault();
+    if (!aramaMetni.trim()) return;
+    setAramaYukleniyor(true);
+    setAramaSonuclari([]);
+    try {
+      const yanit = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(aramaMetni)}`
+      );
+      const veri = await yanit.json();
+      setAramaSonuclari(veri);
+    } catch {
+      setHata('Konum aranırken bir hata oluştu.');
+    } finally {
+      setAramaYukleniyor(false);
+    }
+  };
+
+  const aramaSonucunaGit = (sonuc) => {
+    setUcusHedefi({ lat: parseFloat(sonuc.lat), lng: parseFloat(sonuc.lon), zoom: 16 });
+    setAramaSonuclari([]);
+  };
+
+  const konumuKaydet = async () => {
+    const merkez = merkezRef.current;
+    if (!merkez) return;
+    const isim = window.prompt('Bu konum için bir isim ver:');
+    if (!isim || !isim.trim()) return;
+    const { error } = await supabase
+      .from('favori_konumlar')
+      .insert({ kullanici_id: oturum.user.id, isim: isim.trim(), lat: merkez.lat, lng: merkez.lng });
+    if (error) {
+      setHata('Konum kaydedilemedi: ' + error.message);
+      return;
+    }
+    favorileriYukle();
+  };
+
+  const favoriyeGit = (f) => {
+    setUcusHedefi({ lat: f.lat, lng: f.lng, zoom: 16 });
+  };
+
+  const favoriSil = async (id, e) => {
+    e.stopPropagation();
+    const { error } = await supabase.from('favori_konumlar').delete().eq('id', id);
+    if (error) {
+      setHata('Silinemedi: ' + error.message);
+      return;
+    }
+    setFavoriler((liste) => liste.filter((f) => f.id !== id));
+  };
+
+  const gizlemeDegistir = async (id, yeniDeger, e) => {
+    e.stopPropagation();
+    const { error } = await supabase.from('taramalar').update({ gizli: yeniDeger }).eq('id', id);
+    if (error) {
+      setHata('İşlem başarısız: ' + error.message);
+      return;
+    }
+    setGecmis((liste) => liste.map((t) => (t.id === id ? { ...t, gizli: yeniDeger } : t)));
+  };
 
   // Tarama sırasında alt-aşama metnini döngüyle değiştir (arka planda ciddi bir iş yapıldığı hissini verir)
   useEffect(() => {
@@ -337,6 +438,31 @@ function AnaUygulama({ oturum, rol }) {
         <div style={{ width: '320px', background: '#0f172a', color: 'white', padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           <h2 style={{ marginTop: 0, fontSize: '18px' }}>Uydu Alterasyon Taraması</h2>
 
+          {/* KONUM ARAMA */}
+          <form onSubmit={konumAra} style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+            <input
+              type="text" value={aramaMetni} onChange={(e) => setAramaMetni(e.target.value)}
+              placeholder="Konum ara (yer adı, adres...)"
+              style={{ flex: 1, padding: '9px', borderRadius: '8px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '12px' }}
+            />
+            <button type="submit" disabled={aramaYukleniyor} style={{ padding: '0 12px', borderRadius: '8px', border: 'none', background: '#334155', color: 'white', cursor: 'pointer', fontSize: '13px' }}>
+              🔍
+            </button>
+          </form>
+          {aramaSonuclari.length > 0 && (
+            <div className="yumusak-giris" style={{ marginTop: '6px', background: '#1e293b', borderRadius: '8px', overflow: 'hidden' }}>
+              {aramaSonuclari.map((s, i) => (
+                <div
+                  key={i}
+                  onClick={() => aramaSonucunaGit(s)}
+                  style={{ padding: '8px 10px', fontSize: '11px', cursor: 'pointer', borderBottom: i < aramaSonuclari.length - 1 ? '1px solid #334155' : 'none' }}
+                >
+                  {s.display_name}
+                </div>
+              ))}
+            </div>
+          )}
+
           <button
             onClick={() => setKonumTetikleyici((v) => v + 1)}
             style={{
@@ -346,6 +472,17 @@ function AnaUygulama({ oturum, rol }) {
             }}
           >
             📍 Konumuma Git
+          </button>
+
+          <button
+            onClick={konumuKaydet}
+            style={{
+              padding: '9px', marginTop: '8px', background: 'transparent', color: '#94a3b8',
+              border: '1px solid #334155', borderRadius: '8px', cursor: 'pointer', fontSize: '12px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+            }}
+          >
+            ⭐ Bu Konumu Kaydet
           </button>
 
           <button
@@ -419,19 +556,53 @@ function AnaUygulama({ oturum, rol }) {
             ))}
           </div>
 
+          {/* FAVORİ KONUMLAR */}
+          <div style={{ marginTop: '20px', borderTop: '1px solid #334155', paddingTop: '15px' }}>
+            <h3 style={{ fontSize: '14px', margin: '0 0 10px 0' }}>Kayıtlı Konumlar</h3>
+            {favoriler.length === 0 && <div style={{ fontSize: '12px', color: '#64748b' }}>Henüz kayıtlı konum yok.</div>}
+            {favoriler.map((f) => (
+              <div
+                key={f.id}
+                onClick={() => favoriyeGit(f)}
+                style={{ padding: '7px 8px', marginBottom: '6px', background: '#1e293b', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}
+              >
+                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>⭐ {f.isim}</div>
+                <button
+                  onClick={(e) => favoriSil(f.id, e)}
+                  title="Sil"
+                  style={{ flexShrink: 0, background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '13px' }}
+                >
+                  🗑
+                </button>
+              </div>
+            ))}
+          </div>
+
           {/* GEÇMİŞ */}
           <div style={{ marginTop: '20px', borderTop: '1px solid #334155', paddingTop: '15px', flex: 1 }}>
-            <h3 style={{ fontSize: '14px', margin: '0 0 10px 0' }}>Geçmiş Taramalar</h3>
-            {gecmis.length === 0 && <div style={{ fontSize: '12px', color: '#64748b' }}>Henüz tarama yok.</div>}
-            {gecmis.map((t) => (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <h3 style={{ fontSize: '14px', margin: 0 }}>Geçmiş Taramalar</h3>
+              {rol === 'admin' && (
+                <label style={{ fontSize: '10px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={gizlenenleriGoster} onChange={(e) => setGizlenenleriGoster(e.target.checked)} />
+                  Gizlenenleri göster
+                </label>
+              )}
+            </div>
+            {gecmis.filter((t) => rol === 'admin' && gizlenenleriGoster ? true : !t.gizli).length === 0 && (
+              <div style={{ fontSize: '12px', color: '#64748b' }}>Henüz tarama yok.</div>
+            )}
+            {gecmis
+              .filter((t) => (rol === 'admin' && gizlenenleriGoster ? true : !t.gizli))
+              .map((t) => (
               <div
                 key={t.id}
                 onClick={() => gecmisTaramayiAc(t.id)}
-                style={{ padding: '8px', marginBottom: '6px', background: '#1e293b', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}
+                style={{ padding: '8px', marginBottom: '6px', background: '#1e293b', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px', opacity: t.gizli ? 0.5 : 1 }}
               >
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 600, color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {t.konum_adi || 'Konum bulunamadı'}
+                    {t.konum_adi || 'Konum bulunamadı'} {t.gizli && '(gizli)'}
                   </div>
                   <div style={{ color: '#64748b', fontSize: '11px' }}>{new Date(t.created_at).toLocaleString('tr-TR')}</div>
                   <div style={{ color: t.durum === 'Tamamlandı' ? '#4ade80' : t.durum === 'Hata' ? '#f87171' : '#fbbf24' }}>
@@ -439,13 +610,22 @@ function AnaUygulama({ oturum, rol }) {
                   </div>
                 </div>
                 {rol === 'admin' && (
-                  <button
-                    onClick={(e) => gecmisTaramaSil(t.id, e)}
-                    title="Sil"
-                    style={{ flexShrink: 0, background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '14px', padding: '2px 4px' }}
-                  >
-                    🗑
-                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flexShrink: 0 }}>
+                    <button
+                      onClick={(e) => gizlemeDegistir(t.id, !t.gizli, e)}
+                      title={t.gizli ? 'Göster' : 'Gizle'}
+                      style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '13px', padding: '2px 4px' }}
+                    >
+                      {t.gizli ? '👁' : '🙈'}
+                    </button>
+                    <button
+                      onClick={(e) => gecmisTaramaSil(t.id, e)}
+                      title="Sil"
+                      style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '14px', padding: '2px 4px' }}
+                    >
+                      🗑
+                    </button>
+                  </div>
                 )}
               </div>
             ))}
@@ -456,6 +636,8 @@ function AnaUygulama({ oturum, rol }) {
         <div style={{ flex: 1, position: 'relative' }}>
           <MapContainer center={[40.97, 29.06]} zoom={14} style={{ height: '100%', width: '100%' }}>
             <TileLayer url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxZoom={22} maxNativeZoom={20} />
+            <MerkezTakibi merkezRef={merkezRef} />
+            <NoktayaUc hedef={ucusHedefi} />
             <KonumTespiti tetikleyici={konumTetikleyici} />
             <HaritaOdakla hedef={odaklanilacakAlan} />
             <CizimAraci onAlanCizildi={alanCizildi} />
