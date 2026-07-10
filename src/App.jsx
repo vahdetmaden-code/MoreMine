@@ -148,6 +148,13 @@ function AnaUygulama({ oturum, rol }) {
   const [tarihSabitle, setTarihSabitle] = useState(false);
   const [ozelBaslangic, setOzelBaslangic] = useState('');
   const [ozelBitis, setOzelBitis] = useState('');
+  const [hedefMineral, setHedefMineral] = useState('altin');
+  const MINERAL_ETIKETLERI = {
+    altin: 'Altın',
+    bakir: 'Bakır',
+    demir: 'Demir',
+    genel: 'Genel Keşif',
+  };
   const [sonKullanilanTarihler, setSonKullanilanTarihler] = useState(null);
   const [aramaMetni, setAramaMetni] = useState('');
   const [aramaSonuclari, setAramaSonuclari] = useState([]);
@@ -170,7 +177,7 @@ function AnaUygulama({ oturum, rol }) {
   const gecmisiYukle = useCallback(async () => {
     const { data, error } = await supabase
       .from('taramalar')
-      .select('id, created_at, durum, koordinatlar, konum_adi, gizli')
+      .select('id, created_at, durum, koordinatlar, konum_adi, gizli, hedef_mineral')
       .order('created_at', { ascending: false })
       .limit(50);
     if (!error) setGecmis(data);
@@ -312,6 +319,7 @@ function AnaUygulama({ oturum, rol }) {
           koordinatlar: ciziliAlan, durum: 'İşleniyor', kullanici_id: oturum.user.id, konum_adi: konumAdi,
           ozel_tarih_baslangic: tarihSabitle && ozelBaslangic ? ozelBaslangic : null,
           ozel_tarih_bitis: tarihSabitle && ozelBitis ? ozelBitis : null,
+          hedef_mineral: hedefMineral,
         })
         .select()
         .single();
@@ -333,6 +341,7 @@ function AnaUygulama({ oturum, rol }) {
           koordinatlar: ciziliAlan,
           ozel_baslangic: tarihSabitle && ozelBaslangic ? ozelBaslangic : null,
           ozel_bitis: tarihSabitle && ozelBitis ? ozelBitis : null,
+          hedef_mineral: hedefMineral,
         }),
       });
 
@@ -503,6 +512,18 @@ function AnaUygulama({ oturum, rol }) {
             ⭐ Bu Konumu Kaydet
           </button>
 
+          <div style={{ marginTop: '12px' }}>
+            <label style={{ fontSize: '11px', color: '#94a3b8' }}>Hedef Mineral</label>
+            <select
+              value={hedefMineral} onChange={(e) => setHedefMineral(e.target.value)}
+              style={{ width: '100%', padding: '9px', marginTop: '4px', borderRadius: '8px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '12px' }}
+            >
+              {Object.entries(MINERAL_ETIKETLERI).map(([deger, etiket]) => (
+                <option key={deger} value={deger}>{etiket}</option>
+              ))}
+            </select>
+          </div>
+
           <button
             onClick={taramayiBaslat}
             disabled={yukleniyor}
@@ -634,6 +655,7 @@ function AnaUygulama({ oturum, rol }) {
                   <div style={{ fontWeight: 600, color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {t.konum_adi || 'Konum bulunamadı'} {t.gizli && '(gizli)'}
                   </div>
+                  <div style={{ color: '#64748b', fontSize: '10px' }}>{MINERAL_ETIKETLERI[t.hedef_mineral] || 'Altın'}</div>
                   <div style={{ color: '#64748b', fontSize: '11px' }}>{new Date(t.created_at).toLocaleString('tr-TR')}</div>
                   <div style={{ color: t.durum === 'Tamamlandı' ? '#4ade80' : t.durum === 'Hata' ? '#f87171' : '#fbbf24' }}>
                     {t.durum}

@@ -9,6 +9,19 @@ from google.oauth2 import service_account
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY")
 
+# Hedef minerale göre demir oksit / killi alterasyon / ferröz mineral ağırlıkları.
+# Toplamı her zaman 1.0 olmalı.
+MINERAL_PROFILLERI = {
+    # Altın: genelde killi (argillik) alterasyon + demir oksit (gossan) birlikte görülür
+    'altin': {'d': 0.40, 'k': 0.40, 'f': 0.20},
+    # Bakır (porfiri tip): daha büyük/baskın demir oksit (gossan) şapkası tipik
+    'bakir': {'d': 0.45, 'k': 0.35, 'f': 0.20},
+    # Demir cevheri: doğrudan demir oksit sinyali baskın olmalı
+    'demir': {'d': 0.70, 'k': 0.15, 'f': 0.15},
+    # Genel keşif: hiçbir minerale özel ağırlık vermeden dengeli tarama
+    'genel': {'d': 0.34, 'k': 0.33, 'f': 0.33},
+}
+
 _ee_hazir = False
 
 
@@ -66,8 +79,10 @@ def limit_kontrolu_yap(kullanici_id, tarama_limiti, kullanici_token, hariç_id):
         raise RuntimeError(f"Tarama limitine ulaştın ({tarama_limiti}). Daha fazla tarama için yöneticinle iletişime geç.")
 
 
-def altin_anomali_vektor_uret(koordinatlar, ozel_baslangic=None, ozel_bitis=None):
+def altin_anomali_vektor_uret(koordinatlar, ozel_baslangic=None, ozel_bitis=None, hedef_mineral='altin'):
     gee_baslat()
+
+    agirliklar = MINERAL_PROFILLERI.get(hedef_mineral, MINERAL_PROFILLERI['altin'])
 
     kord_listesi = [[k['lng'], k['lat']] for k in koordinatlar]
     aoi = ee.Geometry.Polygon([kord_listesi])
@@ -197,7 +212,7 @@ def altin_anomali_vektor_uret(koordinatlar, ozel_baslangic=None, ozel_bitis=None
     k = normalizeEt(killiAlterasyon, 'k')
     f = normalizeEt(ferrozMineral, 'f')
 
-    skor = d.multiply(0.40).add(k.multiply(0.40)).add(f.multiply(0.20)).updateMask(gecerliMaske)
+    skor = d.multiply(agirliklar['d']).add(k.multiply(agirliklar['k'])).add(f.multiply(agirliklar['f'])).updateMask(gecerliMaske)
 
     skorPuruzsuz = skor.focal_median(radius=25, units='meters', kernelType='circle') \
         .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
@@ -289,6 +304,9 @@ class handler(BaseHTTPRequestHandler):
             koordinatlar = veri['koordinatlar']
             ozel_baslangic = veri.get('ozel_baslangic')
             ozel_bitis = veri.get('ozel_bitis')
+            hedef_mineral = veri.get('hedef_mineral', 'altin')
+            if hedef_mineral not in MINERAL_PROFILLERI:
+                hedef_mineral = 'altin'
 
             if not kullanici_token:
                 raise RuntimeError("Oturum bilgisi eksik, lütfen tekrar giriş yap.")
@@ -305,13 +323,14 @@ class handler(BaseHTTPRequestHandler):
                 ozel_baslangic = None
                 ozel_bitis = None
 
-            geojson, kullanilan_tarihler = altin_anomali_vektor_uret(koordinatlar, ozel_baslangic, ozel_bitis)
+            geojson, kullanilan_tarihler = altin_anomali_vektor_uret(koordinatlar, ozel_baslangic, ozel_bitis, hedef_mineral)
             kayit_hatasi = supabase_guncelle(kayit_id, {
                 "durum": "Tamamlandı",
                 "sonuc": geojson,
                 "kullanilan_tarihler": kullanilan_tarihler,
                 "ozel_tarih_baslangic": ozel_baslangic,
                 "ozel_tarih_bitis": ozel_bitis,
+                "hedef_mineral": hedef_mineral,
             }, kullanici_token)
 
             self.send_response(200)
