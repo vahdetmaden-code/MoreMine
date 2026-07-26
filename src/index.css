@@ -68,6 +68,15 @@ html, body, #root {
   animation: logoParla 2.4s ease-in-out infinite;
 }
 
+@keyframes canliNabiz {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.canli-konum-nokta {
+  animation: canliNabiz 1.6s ease-in-out infinite;
+}
+
 @keyframes uyduSuzul {
   0% { transform: translate(-160px, -160px) rotate(-45deg) scale(0.7); opacity: 0; }
   15% { opacity: 1; }

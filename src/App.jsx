@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, GeoJSON, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, useMap, useMapEvents, Circle, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import '@geoman-io/leaflet-geoman-free';
 import { supabase } from './supabaseClient';
@@ -42,6 +42,24 @@ function ciziliAlaniGoster(feature, layer) {
 }
 
 // Haritaya çizim aracını (Geoman) ekleyen ve çizilen alanı üst bileşene bildiren yardımcı bileşen
+// Leaflet popup'ları düz HTML olduğu için React state'e doğrudan erişemiyor,
+// bu yüzden paylaşım fonksiyonunu global (window) üzerinden erişilebilir yapıyoruz.
+if (typeof window !== 'undefined') {
+  window.__konumPaylas = async (lat, lng) => {
+    const metin = `📍 Konum: ${lat.toFixed(6)}, ${lng.toFixed(6)}\nHaritada gör: https://www.google.com/maps?q=${lat},${lng}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Konum', text: metin });
+      } catch {
+        // kullanıcı paylaşımı iptal etti, sorun değil
+      }
+    } else {
+      await navigator.clipboard.writeText(metin);
+      window.alert('Konum panoya kopyalandı. İstediğin mesaj uygulamasına yapıştırabilirsin.');
+    }
+  };
+}
+
 function CizimAraci({ onAlanCizildi }) {
   const map = useMap();
   const kontrolEklendiRef = useRef(false);
@@ -52,7 +70,7 @@ function CizimAraci({ onAlanCizildi }) {
 
     map.pm.addControls({
       position: 'topleft',
-      drawMarker: false,
+      drawMarker: true,
       drawCircle: false,
       drawCircleMarker: false,
       drawPolyline: false,
@@ -65,6 +83,26 @@ function CizimAraci({ onAlanCizildi }) {
     });
 
     map.on('pm:create', (e) => {
+      // Nokta işaretleme (pin) -> koordinat göster + paylaş imkanı sun.
+      // Analiz alanı (poligon/dikdörtgen) mantığını ETKİLEMEZ, ayrı bir akış.
+      if (e.shape === 'Marker') {
+        const katman = e.layer;
+        const { lat, lng } = katman.getLatLng();
+        katman
+          .bindPopup(`
+            <div style="font-size:12px; line-height:1.5;">
+              <b>📍 İşaretlenen Konum</b><br/>
+              ${lat.toFixed(6)}, ${lng.toFixed(6)}<br/>
+              <button
+                onclick="window.__konumPaylas(${lat}, ${lng})"
+                style="margin-top:6px; padding:6px 10px; border:none; border-radius:6px; background:#2563eb; color:white; cursor:pointer; font-size:12px;"
+              >Paylaş</button>
+            </div>
+          `)
+          .openPopup();
+        return;
+      }
+
       const katman = e.layer;
       const koordinatlar = katman.getLatLngs()[0].map((nokta) => ({
         lat: nokta.lat,
@@ -115,6 +153,65 @@ function HaritaOdakla({ hedef }) {
 }
 
 // Sayfa açıldığında kullanıcının konumunu bulup haritayı oraya götüren bileşen
+// Cihazın gerçek konumunu SÜREKLİ izleyip haritada hareket eden bir nokta olarak
+// gösteren katman. Diğer hiçbir katmana/noktaya dokunmaz, bağımsız çalışır.
+function CanliKonumKatmani({ aktif }) {
+  const [konum, setKonum] = useState(null);
+  const izleyiciIdRef = useRef(null);
+
+  useEffect(() => {
+    if (!aktif || !navigator.geolocation) {
+      if (izleyiciIdRef.current !== null) {
+        navigator.geolocation.clearWatch(izleyiciIdRef.current);
+        izleyiciIdRef.current = null;
+      }
+      setKonum(null);
+      return;
+    }
+
+    izleyiciIdRef.current = navigator.geolocation.watchPosition(
+      (pozisyon) => {
+        setKonum({
+          lat: pozisyon.coords.latitude,
+          lng: pozisyon.coords.longitude,
+          dogruluk: pozisyon.coords.accuracy,
+        });
+      },
+      () => {
+        // konum alınamadı -> sessizce geç, harita etkilenmesin
+      },
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
+    );
+
+    return () => {
+      if (izleyiciIdRef.current !== null) {
+        navigator.geolocation.clearWatch(izleyiciIdRef.current);
+        izleyiciIdRef.current = null;
+      }
+    };
+  }, [aktif]);
+
+  if (!aktif || !konum) return null;
+
+  return (
+    <>
+      {konum.dogruluk && (
+        <Circle
+          center={[konum.lat, konum.lng]}
+          radius={konum.dogruluk}
+          pathOptions={{ color: '#3b82f6', weight: 1, fillColor: '#3b82f6', fillOpacity: 0.12 }}
+        />
+      )}
+      <CircleMarker
+        center={[konum.lat, konum.lng]}
+        radius={8}
+        pathOptions={{ color: 'white', weight: 2, fillColor: '#3b82f6', fillOpacity: 1 }}
+        className="canli-konum-nokta"
+      />
+    </>
+  );
+}
+
 function KonumTespiti({ tetikleyici }) {
   const map = useMap();
 
@@ -145,6 +242,7 @@ function AnaUygulama({ oturum, rol }) {
   const [hata, setHata] = useState(null);
   const [gecmis, setGecmis] = useState([]);
   const [konumTetikleyici, setKonumTetikleyici] = useState(0);
+  const [canliKonumAktif, setCanliKonumAktif] = useState(false);
   const [tarihSabitle, setTarihSabitle] = useState(false);
   const [ozelBaslangic, setOzelBaslangic] = useState('');
   const [ozelBitis, setOzelBitis] = useState('');
@@ -232,6 +330,29 @@ function AnaUygulama({ oturum, rol }) {
       return;
     }
     favorileriYukle();
+  };
+
+  const alaniPaylas = async () => {
+    if (!ciziliAlan || ciziliAlan.length < 3) {
+      setHata('Paylaşmak için önce haritada bir alan çiz.');
+      return;
+    }
+    const ortLat = ciziliAlan.reduce((t, k) => t + k.lat, 0) / ciziliAlan.length;
+    const ortLng = ciziliAlan.reduce((t, k) => t + k.lng, 0) / ciziliAlan.length;
+    const koordMetni = ciziliAlan.map((k, i) => `${i + 1}. ${k.lat.toFixed(6)}, ${k.lng.toFixed(6)}`).join('\n');
+    const metin = `📍 İşaretlenen Alan Koordinatları:\n${koordMetni}\n\nHaritada gör: https://www.google.com/maps?q=${ortLat},${ortLng}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'İşaretlenen Alan', text: metin });
+      } catch {
+        // kullanıcı iptal etti, sorun değil
+      }
+    } else {
+      await navigator.clipboard.writeText(metin);
+      setHata(null);
+      window.alert('Alan koordinatları panoya kopyalandı. İstediğin mesaj uygulamasına yapıştırabilirsin.');
+    }
   };
 
   const favoriyeGit = (f) => {
@@ -491,6 +612,17 @@ function AnaUygulama({ oturum, rol }) {
           </div>
 
           <button
+            onClick={alaniPaylas}
+            style={{
+              padding: '9px', marginTop: '8px', background: 'transparent', color: '#94a3b8',
+              border: '1px solid #334155', borderRadius: '8px', cursor: 'pointer', fontSize: '12px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+            }}
+          >
+            📤 İşaretlenen Alanı Paylaş
+          </button>
+
+          <button
             onClick={() => setKonumTetikleyici((v) => v + 1)}
             style={{
               padding: '9px', marginTop: '10px', background: 'transparent', color: '#94a3b8',
@@ -499,6 +631,19 @@ function AnaUygulama({ oturum, rol }) {
             }}
           >
             📍 Konumuma Git
+          </button>
+
+          <button
+            onClick={() => setCanliKonumAktif((v) => !v)}
+            style={{
+              padding: '9px', marginTop: '8px', background: canliKonumAktif ? '#1e3a8a' : 'transparent',
+              color: canliKonumAktif ? '#93c5fd' : '#94a3b8',
+              border: `1px solid ${canliKonumAktif ? '#2563eb' : '#334155'}`, borderRadius: '8px',
+              cursor: 'pointer', fontSize: '12px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+            }}
+          >
+            {canliKonumAktif ? '🔵 Canlı Konum: Açık' : '⚪ Canlı Konumu Göster'}
           </button>
 
           <button
@@ -692,6 +837,7 @@ function AnaUygulama({ oturum, rol }) {
             <NoktayaUc hedef={ucusHedefi} />
             <KonumTespiti tetikleyici={konumTetikleyici} />
             <HaritaOdakla hedef={odaklanilacakAlan} />
+            <CanliKonumKatmani aktif={canliKonumAktif} />
             <CizimAraci onAlanCizildi={alanCizildi} />
             {sonuc && sonucGorunur && <GeoJSON key={JSON.stringify(sonuc).length} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} />}
           </MapContainer>
