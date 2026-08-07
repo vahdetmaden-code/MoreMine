@@ -6,6 +6,7 @@ import { supabase } from './supabaseClient';
 import Giris from './Giris';
 import AdminPaneli from './AdminPaneli';
 import Harita3D from './Harita3D';
+import ManyetikKatman from './ManyetikKatman';
 
 // Sınıf değerine göre renk (motor.py / api/analyze.py ile birebir aynı olmalı)
 const RENKLER = {
@@ -840,6 +841,7 @@ function AnaUygulama({ oturum, rol }) {
             <CanliKonumKatmani aktif={canliKonumAktif} />
             <CizimAraci onAlanCizildi={alanCizildi} />
             {sonuc && sonucGorunur && <GeoJSON key={JSON.stringify(sonuc).length} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} />}
+            <ManyetikKatman ciziliAlan={ciziliAlan} optikSonuc={sonuc} taramaId={null} />
           </MapContainer>
 
           {/* EVRE 1: UYDU KONUMA YÖNELİYOR */}

@@ -5,6 +5,9 @@
     },
     "api/admin_kullanici_ekle.py": {
       "maxDuration": 20
+    },
+    "api/analyze_manyetik.py": {
+      "maxDuration": 30
     }
   }
 }
