@@ -110,9 +110,13 @@ export default function ManyetikKatman({ ciziliAlan, optikSonuc, taramaId }) {
   const [yukleniyor, setYukleniyor] = useState(false);
   const [hata, setHata] = useState(null);
 
+  // App.jsx'te ciziliAlan zaten [{lat, lng}, ...] dizisi olarak tutuluyor
+  // (CizimAraci -> alanCizildi). API'nin beklediği biçim de bu, dönüşüm gerekmiyor.
+  const alanHazir = Array.isArray(ciziliAlan) && ciziliAlan.length >= 3;
+
   const analizEt = useCallback(async () => {
-    if (!ciziliAlan) {
-      setHata('Önce haritada bir alan çiz.');
+    if (!alanHazir) {
+      setHata('Önce haritada bir alan çiz (en az 3 köşe).');
       return;
     }
     setYukleniyor(true);
@@ -121,10 +125,6 @@ export default function ManyetikKatman({ ciziliAlan, optikSonuc, taramaId }) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Oturum bulunamadı, tekrar giriş yap.');
 
-      // Çizili alanın köşe noktalarını API'nin beklediği biçime çevir
-      const halka = ciziliAlan.geometry.coordinates[0];
-      const koordinatlar = halka.map(([lng, lat]) => ({ lat, lng }));
-
       const yanit = await fetch('/api/analyze_manyetik', {
         method: 'POST',
         headers: {
@@ -132,7 +132,7 @@ export default function ManyetikKatman({ ciziliAlan, optikSonuc, taramaId }) {
           Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          koordinatlar,
+          koordinatlar: ciziliAlan,
           tarama_id: taramaId || null,
           optik_sonuc: optikSonuc || null,
           hedef_profil: profil,
@@ -148,7 +148,7 @@ export default function ManyetikKatman({ ciziliAlan, optikSonuc, taramaId }) {
     } finally {
       setYukleniyor(false);
     }
-  }, [ciziliAlan, optikSonuc, taramaId, profil]);
+  }, [ciziliAlan, alanHazir, optikSonuc, taramaId, profil]);
 
   return (
     <>
@@ -218,16 +218,22 @@ export default function ManyetikKatman({ ciziliAlan, optikSonuc, taramaId }) {
 
             <button
               onClick={analizEt}
-              disabled={yukleniyor || !ciziliAlan}
+              disabled={yukleniyor || !alanHazir}
               style={{
                 width: '100%', padding: 9, borderRadius: 8, border: 'none',
-                background: yukleniyor || !ciziliAlan ? '#475569' : '#7c3aed',
-                color: '#fff', cursor: yukleniyor || !ciziliAlan ? 'not-allowed' : 'pointer',
+                background: yukleniyor || !alanHazir ? '#475569' : '#7c3aed',
+                color: '#fff', cursor: yukleniyor || !alanHazir ? 'not-allowed' : 'pointer',
                 fontWeight: 600, marginBottom: 10,
               }}
             >
               {yukleniyor ? 'Analiz ediliyor…' : 'Manyetik Analiz Yap'}
             </button>
+
+            {!alanHazir && !hata && (
+              <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 10 }}>
+                Haritada bir alan çizince aktifleşir.
+              </div>
+            )}
 
             {hata && (
               <div style={{ background: '#7f1d1d', padding: 8, borderRadius: 6, marginBottom: 10, fontSize: 12 }}>
