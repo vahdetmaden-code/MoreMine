@@ -179,44 +179,110 @@ def geotiff_oku(yol):
 
 
 def csv_oku(yol):
-    """EMAG2 v3'un CSV surumu icin (GeoTIFF bulunamazsa)."""
+    """
+    EMAG2 v3 CSV surumunu okur.
+
+    SUTUN DUZENI (baslik satiri yok, 8 sutun):
+        0: i          satir indeksi
+        1: j          sutun indeksi
+        2: lon        boylam
+        3: lat        enlem
+        4: deniz      deniz seviyesi anomalisi  <- COK BOSLUK VAR (99999)
+        5: yukseltilmis  4 km'ye yukseltilmis anomali  <- KESINTISIZ
+        6: kod        veri kaynagi kodu
+        7: hata       tahmini hata
+
+    HANGI SUTUNU KULLANIYORUZ VE NEDEN:
+
+      4. sutun (deniz seviyesi) daha keskindir, yuzeye yakin detayi
+      korur. AMA sadece gercek ucus/gemi olcumu olan yerlerde doludur;
+      Turkiye'nin buyuk kisminda 99999 (veri yok) yazar. Ilk denemede
+      Usak civarinda en yakin hucre 95 km oteye dustu, sebebi buydu.
+
+      5. sutun (yukseltilmis) uydu modelinden turetilir ve HER YERDE
+      doludur. Bedeli: veri 4 km yuksege tasinmis gibi hesaplandigi icin
+      daha puruzsuzdur, ince detay bastirilmistir.
+
+      Bizim hucre boyumuz zaten ~3.7 km. Yani 4 km'lik yukseltmenin
+      sildigi detayi bu cozunurlukte zaten coozemezdik. Buna karsilik
+      kesintisiz kapsama, turev hesabi icin sart: gridde delik olursa
+      gradyan o kenarlarda sahte sicramalar uretir.
+
+      Bu yuzden 5. sutunu kullaniyoruz. Iki sutunu karistirmak (birinde
+      olani ondan, olmayani digerinden almak) daha da kotu olurdu:
+      iki kaynagin birlestigi yerde YAPAY bir gradyan kusagi olusur ve
+      sistem orayi "yapisal sinir" sanip yanlis hedef uretirdi.
+    """
     try:
         import pandas as pd
     except ImportError:
         print("HATA: pandas kurulu degil.  ->  pip install pandas")
         sys.exit(1)
 
+    SUTUN_LON, SUTUN_LAT = 2, 3
+    SUTUN_DENIZ, SUTUN_YUKSELTILMIS = 4, 5
+
     lon_min = TURKIYE["lon_min"] - TAMPON_DERECE
     lon_max = TURKIYE["lon_max"] + TAMPON_DERECE
     lat_min = TURKIYE["lat_min"] - TAMPON_DERECE
     lat_max = TURKIYE["lat_max"] + TAMPON_DERECE
 
-    print("  CSV parca parca okunuyor (dosya buyuk, biraz surebilir)...")
+    print("  CSV parca parca okunuyor (dosya buyuk, birkac dakika surer)...")
     parcalar = []
-    for parca in pd.read_csv(yol, chunksize=500_000, header=None,
-                             comment="#", sep=None, engine="python"):
-        # EMAG2 v3 CSV duzeni: i, j, lon, lat, deniz_seviyesi_anomali, ...
-        parca.columns = [f"s{i}" for i in range(parca.shape[1])]
-        p = parca[(parca.s2 >= lon_min) & (parca.s2 <= lon_max) &
-                  (parca.s3 >= lat_min) & (parca.s3 <= lat_max)]
+    okunan = 0
+    for parca in pd.read_csv(
+        yol, chunksize=2_000_000, header=None, sep=",",
+        usecols=[SUTUN_LON, SUTUN_LAT, SUTUN_DENIZ, SUTUN_YUKSELTILMIS],
+    ):
+        parca.columns = ["lon", "lat", "deniz", "yukseltilmis"]
+        okunan += len(parca)
+        p = parca[
+            (parca.lon >= lon_min) & (parca.lon <= lon_max) &
+            (parca.lat >= lat_min) & (parca.lat <= lat_max)
+        ]
         if len(p):
-            parcalar.append(p[["s2", "s3", "s4"]])
+            parcalar.append(p)
+        sys.stdout.write(f"\r  Taranan satir: {okunan:,}   "
+                         f"Turkiye kesitinde bulunan: "
+                         f"{sum(len(x) for x in parcalar):,}")
+        sys.stdout.flush()
+    print()
 
     if not parcalar:
-        print("HATA: CSV icinde Turkiye araligina denk gelen satir bulunamadi.")
+        print("HATA: CSV icinde Turkiye araligina denk gelen satir yok.")
         sys.exit(1)
 
-    tablo = pd.concat(parcalar)
-    tablo.columns = ["lon", "lat", "anomali"]
+    tablo = pd.concat(parcalar, ignore_index=True)
 
+    # --- Iki sutunun kapsamini karsilastirip kullaniciya goster ---
+    deniz_dolu = int((tablo.deniz.abs() < 10000).sum())
+    yuk_dolu = int((tablo.yukseltilmis.abs() < 10000).sum())
+    toplam = len(tablo)
+    print(f"  Turkiye kesiti          : {toplam:,} hucre")
+    print(f"  4. sutun (deniz sv.)    : {deniz_dolu:,} dolu "
+          f"(%{100*deniz_dolu/toplam:.0f}) - BOSLUKLU, kullanilmiyor")
+    print(f"  5. sutun (yukseltilmis) : {yuk_dolu:,} dolu "
+          f"(%{100*yuk_dolu/toplam:.0f}) - KULLANILAN")
+
+    tablo = tablo[tablo.yukseltilmis.abs() < 10000]
+    if len(tablo) == 0:
+        print("HATA: yukseltilmis sutununda da gecerli deger yok.")
+        sys.exit(1)
+
+    # --- Gridi vektorel kur (satir satir dongu cok yavas kaliyordu) ---
+    lat_artan = np.sort(tablo.lat.unique())
     lon = np.sort(tablo.lon.unique())
-    lat = np.sort(tablo.lat.unique())[::-1]  # kuzeyden guneye
+    lat = lat_artan[::-1]  # kuzeyden guneye
+
+    satir = (len(lat_artan) - 1) - np.searchsorted(lat_artan, tablo.lat.values)
+    sutun = np.searchsorted(lon, tablo.lon.values)
 
     grid = np.full((len(lat), len(lon)), np.nan)
-    lon_ix = {v: i for i, v in enumerate(lon)}
-    lat_ix = {v: i for i, v in enumerate(lat)}
-    for _, s in tablo.iterrows():
-        grid[lat_ix[s.lat], lon_ix[s.lon]] = s.anomali
+    grid[satir, sutun] = tablo.yukseltilmis.values
+
+    dolu = np.isfinite(grid).sum()
+    print(f"  Grid                    : {len(lat)} x {len(lon)} "
+          f"({dolu:,} dolu, %{100*dolu/grid.size:.0f} kapsama)")
 
     return grid, lon, lat
 
