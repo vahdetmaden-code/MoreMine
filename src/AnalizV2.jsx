@@ -18,6 +18,12 @@ const MINERALLER = [
   { deger: 'genel', etiket: 'Genel' },
 ];
 
+const HASSASIYETLER = [
+  { deger: 'yuksek', etiket: 'Yüksek', aciklama: 'Çok sinyal, çok gürültü' },
+  { deger: 'orta', etiket: 'Orta', aciklama: 'Dengeli — varsayılan' },
+  { deger: 'dusuk', etiket: 'Düşük', aciklama: 'Sadece en güçlü anomaliler' },
+];
+
 const SINIF_RENK = { 1: '#22c55e', 2: '#eab308', 3: '#f97316', 4: '#dc2626' };
 const SINIF_AD = { 1: 'Zayıf', 2: 'Orta', 3: 'Güçlü', 4: 'Çok güçlü' };
 
@@ -51,6 +57,7 @@ export default function AnalizV2({ ciziliAlan }) {
   const [mineral, setMineral] = useState('altin');
   const [tarimMaskesi, setTarimMaskesi] = useState(true);
   const [yerlesimMaskesi, setYerlesimMaskesi] = useState(true);
+  const [hassasiyet, setHassasiyet] = useState('orta');
   const [gorunur, setGorunur] = useState(true);
   const [sonuc, setSonuc] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
@@ -80,6 +87,7 @@ export default function AnalizV2({ ciziliAlan }) {
           hedef_mineral: mineral,
           tarim_maskesi: tarimMaskesi,
           yerlesim_maskesi: yerlesimMaskesi,
+          hassasiyet: hassasiyet,
         }),
       });
 
@@ -92,7 +100,7 @@ export default function AnalizV2({ ciziliAlan }) {
     } finally {
       setYukleniyor(false);
     }
-  }, [ciziliAlan, alanHazir, mineral, tarimMaskesi, yerlesimMaskesi]);
+  }, [ciziliAlan, alanHazir, mineral, tarimMaskesi, yerlesimMaskesi, hassasiyet]);
 
   const poligonSayisi = sonuc?.sonuc?.features?.length ?? 0;
 
@@ -100,7 +108,7 @@ export default function AnalizV2({ ciziliAlan }) {
     <>
       {sonuc && gorunur && poligonSayisi > 0 && (
         <GeoJSON
-          key={`v2-${mineral}-${poligonSayisi}-${tarimMaskesi}-${yerlesimMaskesi}`}
+          key={`v2-${mineral}-${hassasiyet}-${poligonSayisi}-${tarimMaskesi}-${yerlesimMaskesi}`}
           data={sonuc.sonuc}
           style={v2Stil}
           onEachFeature={v2Bilgi}
@@ -149,6 +157,23 @@ export default function AnalizV2({ ciziliAlan }) {
               ))}
             </select>
 
+            <label style={{ display: 'block', marginBottom: 4, color: '#94a3b8' }}>Hassasiyet</label>
+            <select
+              value={hassasiyet}
+              onChange={(e) => setHassasiyet(e.target.value)}
+              style={{
+                width: '100%', padding: 7, borderRadius: 6, marginBottom: 4,
+                background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155',
+              }}
+            >
+              {HASSASIYETLER.map((h) => (
+                <option key={h.deger} value={h.deger}>{h.etiket}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 10 }}>
+              {HASSASIYETLER.find((h) => h.deger === hassasiyet)?.aciklama}
+            </div>
+
             <div style={{ marginBottom: 10 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5, cursor: 'pointer' }}>
                 <input type="checkbox" checked={tarimMaskesi} onChange={(e) => setTarimMaskesi(e.target.checked)} />
@@ -191,6 +216,36 @@ export default function AnalizV2({ ciziliAlan }) {
                   <input type="checkbox" checked={gorunur} onChange={(e) => setGorunur(e.target.checked)} />
                   <span>v2 sonucunu göster</span>
                 </label>
+
+                {sonuc.skor_dagilimi && (
+                  <div style={{
+                    borderTop: '1px solid #334155', paddingTop: 8, marginBottom: 8,
+                    fontSize: 11, lineHeight: 1.7,
+                  }}>
+                    <b style={{ color: '#cbd5e1' }}>Skor dağılımı (teşhis)</b>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>1. sınıf eşiği</span>
+                      <b style={{ color: '#f59e0b' }}>{sonuc.esikler?.['1']}</b>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Alandaki en yüksek</span>
+                      <b style={{
+                        color: (sonuc.skor_dagilimi.max ?? 0) >= (sonuc.esikler?.['1'] ?? 1)
+                          ? '#22c55e' : '#dc2626',
+                      }}>{sonuc.skor_dagilimi.max ?? '—'}</b>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8' }}>
+                      <span>p99 / p95 / p90</span>
+                      <span>
+                        {sonuc.skor_dagilimi.p99 ?? '—'} / {sonuc.skor_dagilimi.p95 ?? '—'} / {sonuc.skor_dagilimi.p90 ?? '—'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8' }}>
+                      <span>Kararlılık (en yüksek)</span>
+                      <span>%{Math.round((sonuc.kararlilik_dagilimi?.max ?? 0) * 100)}</span>
+                    </div>
+                  </div>
+                )}
 
                 {poligonSayisi === 0 ? (
                   <div style={{

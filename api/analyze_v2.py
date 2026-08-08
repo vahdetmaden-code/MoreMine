@@ -53,12 +53,21 @@ ORTAK_OLCEK = 10          # cizilen alan icin (v1 ile ayni)
 BOLGESEL_OLCEK = 60       # bolgesel istatistik icin - kaba yeter, cok daha hizli
 BOLGESEL_TAMPON = 25000   # metre
 
-# MUTLAK sinif esikleri.
+# MUTLAK sinif esikleri, HASSASIYET seviyesine gore.
 # v1'de esikler alanin kendi yuzdeliklerinden geliyordu (hep bir seyler bulunurdu).
 # v2'de esikler SABIT: skor bolgesel dagilima gore normalize edildigi icin
-# 0.80 demek "bu bolgenin en ust dilimlerinde" demek. Hicbir piksel esigi
-# gecmezse hicbir poligon donmez - ve bu dogru cevaptir.
-SINIF_ESIKLERI = {1: 0.55, 2: 0.68, 3: 0.80, 4: 0.90}
+# 0.60 demek "bu bolgenin ust dilimlerinde" demek.
+#
+# NOT: ilk denemede tek bir sabit esik seti kullanmistim (1.sinif = 0.55) ve
+# hicbir yerde poligon uretmedi. Sebebi: bir pikselin o esige ulasmasi icin
+# UC indeksin de bolgesel p95'e yakin olmasi gerekiyordu, ama indeksler
+# gerçekte bu kadar birlikte hareket etmiyor. Simdi hem esikler dusuruldu
+# hem de kullanici hassasiyeti degistirebiliyor.
+HASSASIYET_ESIKLERI = {
+    'yuksek': {1: 0.30, 2: 0.40, 3: 0.50, 4: 0.62},   # cok sinyal, cok gurultu
+    'orta':   {1: 0.40, 2: 0.50, 3: 0.60, 4: 0.72},   # varsayilan
+    'dusuk':  {1: 0.50, 2: 0.60, 3: 0.70, 4: 0.82},   # sadece en guclu olanlar
+}
 
 _ee_hazir = False
 
@@ -105,10 +114,12 @@ def kullanici_bilgisini_al(kullanici_token):
 
 def analiz_v2(koordinatlar, hedef_mineral='altin',
               tarim_maskesi=True, yerlesim_maskesi=True,
+              hassasiyet='orta',
               ozel_baslangic=None, ozel_bitis=None):
     gee_baslat()
 
     agirliklar = MINERAL_PROFILLERI.get(hedef_mineral, MINERAL_PROFILLERI['altin'])
+    esikler = HASSASIYET_ESIKLERI.get(hassasiyet, HASSASIYET_ESIKLERI['orta'])
 
     kord_listesi = [[k['lng'], k['lat']] for k in koordinatlar]
     aoi = ee.Geometry.Polygon([kord_listesi])
@@ -230,10 +241,13 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
     # -----------------------------------------------------------------
     # Çarpım kullanıyoruz: kararlılık düşükse skor da düşer.
     # Toplama olsaydı tek güçlü sinyal, kararsızlığı gizlerdi.
-    # 0.35 taban, tek görüntüde çıkan sinyali tamamen sıfırlamamak için —
-    # bulut/gölge yüzünden bazı görüntülerde piksel maskeli olabilir.
+    #
+    # 0.50 taban: ilk sürümde 0.35 kullanmıştım ve kararlılık çarpanı skoru
+    # eşiğin altına çekip her yerde sıfır sonuç üretti. Bulut/gölge yüzünden
+    # bir piksel bazı görüntülerde maskeli olabiliyor; bu onun kararsız
+    # olduğu anlamına gelmiyor. Çarpan artık daha yumuşak.
     nihai_skor = taban_skor.multiply(
-        ee.Image(0.35).add(kararlilik.multiply(0.65))
+        ee.Image(0.50).add(kararlilik.multiply(0.50))
     ).rename('skor')
 
     nihai_puruzsuz = nihai_skor.focal_median(
@@ -241,15 +255,46 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
     ).reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
 
     # -----------------------------------------------------------------
+    # TEŞHİS: gerçek skor dağılımı
+    # -----------------------------------------------------------------
+    # Eşiği tahminle ayarlamak yerine, alanda gerçekte hangi skorların
+    # olduğunu ölçüp geri döndürüyoruz. Sıfır sonuç çıktığında "eşik mi
+    # yüksek, gerçekten mi bir şey yok" sorusu böylece cevaplanabiliyor.
+    skor_dagilim = nihai_puruzsuz.addBands(kararlilik).updateMask(gecerliMaske) \
+        .reduceRegion(
+            reducer=ee.Reducer.percentile([50, 75, 90, 95, 99]).combine(
+                reducer2=ee.Reducer.max(), sharedInputs=True),
+            geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK,
+            maxPixels=1e10, bestEffort=True, tileScale=4,
+        ).getInfo()
+
+    def yuvarla(x):
+        return round(x, 3) if isinstance(x, (int, float)) else None
+
+    teshis_skor = {
+        'p50': yuvarla(skor_dagilim.get('skor_p50')),
+        'p75': yuvarla(skor_dagilim.get('skor_p75')),
+        'p90': yuvarla(skor_dagilim.get('skor_p90')),
+        'p95': yuvarla(skor_dagilim.get('skor_p95')),
+        'p99': yuvarla(skor_dagilim.get('skor_p99')),
+        'max': yuvarla(skor_dagilim.get('skor_max')),
+    }
+    teshis_kararlilik = {
+        'p50': yuvarla(skor_dagilim.get('kararlilik_p50')),
+        'p90': yuvarla(skor_dagilim.get('kararlilik_p90')),
+        'max': yuvarla(skor_dagilim.get('kararlilik_max')),
+    }
+
+    # -----------------------------------------------------------------
     # SINIFLANDIRMA — MUTLAK EŞİKLERLE
     # -----------------------------------------------------------------
     siniflandirilmis = ee.Image(0) \
-        .where(nihai_puruzsuz.gt(SINIF_ESIKLERI[1]), 1) \
-        .where(nihai_puruzsuz.gt(SINIF_ESIKLERI[2]), 2) \
-        .where(nihai_puruzsuz.gt(SINIF_ESIKLERI[3]), 3) \
-        .where(nihai_puruzsuz.gt(SINIF_ESIKLERI[4]), 4) \
+        .where(nihai_puruzsuz.gt(esikler[1]), 1) \
+        .where(nihai_puruzsuz.gt(esikler[2]), 2) \
+        .where(nihai_puruzsuz.gt(esikler[3]), 3) \
+        .where(nihai_puruzsuz.gt(esikler[4]), 4) \
         .updateMask(gecerliMaske) \
-        .updateMask(nihai_puruzsuz.gt(SINIF_ESIKLERI[1])) \
+        .updateMask(nihai_puruzsuz.gt(esikler[1])) \
         .rename('sinif').toInt() \
         .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
 
@@ -287,10 +332,16 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
             'toplam_piksel': toplam_piksel,
             'gecerli_piksel': gecerli_piksel,
             'anomali_piksel': 0,
+            'hassasiyet': hassasiyet,
+            'esikler': esikler,
+            'skor_dagilimi': teshis_skor,
+            'kararlilik_dagilimi': teshis_kararlilik,
             'bos_sonuc_aciklamasi': (
-                "Bu alanda çevresindeki ~25 km'lik bölgeye göre öne çıkan "
-                "spektral anomali bulunamadı. Bu, motorun çalışmadığı değil, "
-                "bölgesel arka plandan ayrışan bir şey olmadığı anlamına gelir."
+                f"Eşik {esikler[1]} idi, alandaki en yüksek skor "
+                f"{teshis_skor.get('max')}. "
+                + ("Eşik çok yakın — hassasiyeti yükseltmeyi dene."
+                   if (teshis_skor.get('max') or 0) > esikler[1] * 0.8
+                   else "Bölgesel arka plandan ayrışan bir şey yok.")
             ),
         }
 
@@ -320,6 +371,10 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
         'toplam_piksel': toplam_piksel,
         'gecerli_piksel': gecerli_piksel,
         'anomali_piksel': anomali_piksel,
+        'hassasiyet': hassasiyet,
+        'esikler': esikler,
+        'skor_dagilimi': teshis_skor,
+        'kararlilik_dagilimi': teshis_kararlilik,
         'bos_sonuc_aciklamasi': None,
     }
 
@@ -343,6 +398,7 @@ class handler(BaseHTTPRequestHandler):
             hedef_mineral = veri.get('hedef_mineral', 'altin')
             tarim_maskesi = veri.get('tarim_maskesi', True)
             yerlesim_maskesi = veri.get('yerlesim_maskesi', True)
+            hassasiyet = veri.get('hassasiyet', 'orta')
 
             kullanici_id, profil = kullanici_bilgisini_al(kullanici_token)
             if not profil.get('aktif', True):
@@ -353,6 +409,7 @@ class handler(BaseHTTPRequestHandler):
                 hedef_mineral=hedef_mineral,
                 tarim_maskesi=tarim_maskesi,
                 yerlesim_maskesi=yerlesim_maskesi,
+                hassasiyet=hassasiyet,
             )
 
             self.send_response(200)
