@@ -1,4 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
+import {
+  guvenlikSuresiniOku,
+  guvenlikSuresiniYaz,
+  guvenlikAlarmiTestEt,
+} from './GuvenlikKatmani';
 import { supabase } from './supabaseClient';
 
 export default function AdminPaneli({ onKapat }) {
@@ -16,6 +21,11 @@ export default function AdminPaneli({ onKapat }) {
   const [yeniLimit, setYeniLimit] = useState('');
   const [yeniRol, setYeniRol] = useState('kullanici');
   const [ekleniyor, setEkleniyor] = useState(false);
+
+  // Güvenlik oturum süresi (dakika). GuvenlikKatmani ile localStorage
+  // üzerinden paylaşılıyor; kaydedince olay yayınlanıp anında devreye giriyor.
+  const [guvenlikDakika, setGuvenlikDakika] = useState(() => guvenlikSuresiniOku());
+  const [guvenlikKaydedildi, setGuvenlikKaydedildi] = useState(false);
 
   const veriYukle = async () => {
     setYukleniyor(true);
@@ -104,6 +114,7 @@ export default function AdminPaneli({ onKapat }) {
           <button onClick={() => setSekme('kullanicilar')} style={{ padding: '8px 14px', borderRadius: '8px 8px 0 0', border: 'none', background: sekme === 'kullanicilar' ? '#1e293b' : 'transparent', color: 'white', cursor: 'pointer', fontSize: '13px' }}>Kullanıcılar</button>
           <button onClick={() => setSekme('ekle')} style={{ padding: '8px 14px', borderRadius: '8px 8px 0 0', border: 'none', background: sekme === 'ekle' ? '#1e293b' : 'transparent', color: 'white', cursor: 'pointer', fontSize: '13px' }}>Kullanıcı Ekle</button>
           <button onClick={() => setSekme('taramalar')} style={{ padding: '8px 14px', borderRadius: '8px 8px 0 0', border: 'none', background: sekme === 'taramalar' ? '#1e293b' : 'transparent', color: 'white', cursor: 'pointer', fontSize: '13px' }}>Tüm Taramalar</button>
+          <button onClick={() => setSekme('guvenlik')} style={{ padding: '8px 14px', borderRadius: '8px 8px 0 0', border: 'none', background: sekme === 'guvenlik' ? '#1e293b' : 'transparent', color: 'white', cursor: 'pointer', fontSize: '13px' }}>Güvenlik</button>
         </div>
 
         <div style={{ padding: '20px 22px', overflowY: 'auto', flex: 1 }}>
@@ -218,6 +229,67 @@ export default function AdminPaneli({ onKapat }) {
                 ))}
               </tbody>
             </table>
+          )}
+
+          {!yukleniyor && sekme === 'guvenlik' && (
+            <div style={{ color: 'white', fontSize: '13px', maxWidth: '460px' }}>
+              <div style={{ fontWeight: 700, marginBottom: '6px' }}>Oturum Süresi</div>
+              <div style={{ color: '#94a3b8', lineHeight: 1.6, marginBottom: '14px' }}>
+                Sistem bu süre kadar açık kaldığında güvenlik katmanı devreye
+                girer ve oturum otomatik olarak kapatılır.
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
+                <input
+                  type="number"
+                  min="1"
+                  max="240"
+                  value={guvenlikDakika}
+                  onChange={(e) => { setGuvenlikDakika(e.target.value); setGuvenlikKaydedildi(false); }}
+                  style={{ width: '90px', padding: '8px', borderRadius: '6px', background: '#0f172a', color: 'white', border: '1px solid #334155', fontSize: '13px' }}
+                />
+                <span style={{ color: '#94a3b8' }}>dakika</span>
+                <button
+                  onClick={() => {
+                    const kaydedilen = guvenlikSuresiniYaz(guvenlikDakika);
+                    setGuvenlikDakika(kaydedilen);
+                    setGuvenlikKaydedildi(true);
+                    setTimeout(() => setGuvenlikKaydedildi(false), 2500);
+                  }}
+                  style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: '#2563eb', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                >
+                  Kaydet
+                </button>
+                {guvenlikKaydedildi && (
+                  <span style={{ color: '#4ade80', fontSize: '12px' }}>Kaydedildi</span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '14px' }}>
+                {[5, 15, 30, 60].map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => { setGuvenlikDakika(guvenlikSuresiniYaz(d)); setGuvenlikKaydedildi(true); setTimeout(() => setGuvenlikKaydedildi(false), 2500); }}
+                    style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #334155', background: Number(guvenlikDakika) === d ? '#1e293b' : 'transparent', color: '#cbd5e1', cursor: 'pointer', fontSize: '12px' }}
+                  >
+                    {d} dk
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ borderTop: '1px solid #1e293b', paddingTop: '14px' }}>
+                <div style={{ color: '#94a3b8', lineHeight: 1.6, marginBottom: '10px' }}>
+                  Alarmı beklemeden görmek için test edebilirsin. Test, oturumu
+                  gerçekten kapatır — tekrar giriş yapman gerekir.
+                </div>
+                <button
+                  onClick={guvenlikAlarmiTestEt}
+                  style={{ padding: '9px 18px', borderRadius: '6px', border: 'none', background: '#b91c1c', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                >
+                  Alarmı Şimdi Test Et
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>

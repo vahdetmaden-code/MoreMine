@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from './supabaseClient';
 
 /*
@@ -14,7 +14,27 @@ import { supabase } from './supabaseClient';
 
 const VARSAYILAN_DAKIKA = 15;
 const GERI_SAYIM_SANIYE = 8;
-const AYAR_ANAHTARI = 'moremine_guvenlik_dakika';
+export const AYAR_ANAHTARI = 'moremine_guvenlik_dakika';
+export const OLAY_DEGISTI = 'moremine-guvenlik-degisti';
+export const OLAY_TEST = 'moremine-guvenlik-test';
+
+// Admin panelinin çağıracağı yardımcılar.
+// Böylece AdminPaneli.jsx, GuvenlikKatmani'nın iç yapısını bilmek zorunda kalmıyor.
+export function guvenlikSuresiniOku() {
+  const kayitli = parseInt(localStorage.getItem(AYAR_ANAHTARI), 10);
+  return Number.isFinite(kayitli) && kayitli > 0 ? kayitli : VARSAYILAN_DAKIKA;
+}
+
+export function guvenlikSuresiniYaz(dakika) {
+  const sayi = Math.max(1, Math.min(240, parseInt(dakika, 10) || VARSAYILAN_DAKIKA));
+  localStorage.setItem(AYAR_ANAHTARI, String(sayi));
+  window.dispatchEvent(new CustomEvent(OLAY_DEGISTI, { detail: { dakika: sayi } }));
+  return sayi;
+}
+
+export function guvenlikAlarmiTestEt() {
+  window.dispatchEvent(new CustomEvent(OLAY_TEST));
+}
 
 // Alarm ekranının CSS animasyonları — bileşen içinde tanımlanıyor ki
 // index.css'e dokunmak gerekmesin.
@@ -48,15 +68,31 @@ const ANIMASYON_CSS = `
 }
 `;
 
-export default function GuvenlikKatmani({ admin = false }) {
+export default function GuvenlikKatmani() {
   const [dakika, setDakika] = useState(() => {
     const kayitli = parseInt(localStorage.getItem(AYAR_ANAHTARI), 10);
     return Number.isFinite(kayitli) && kayitli > 0 ? kayitli : VARSAYILAN_DAKIKA;
   });
   const [alarm, setAlarm] = useState(false);
   const [kalan, setKalan] = useState(GERI_SAYIM_SANIYE);
-  const [ayarAcik, setAyarAcik] = useState(false);
   const sayacRef = useRef(null);
+
+  // --- Admin panelinden gelen değişiklikleri dinle ---
+  // Sayfayı yenilemeden süre değişikliği ve test tetiklemesi çalışsın diye.
+  useEffect(() => {
+    const sureDegisti = (olay) => {
+      const yeni = olay?.detail?.dakika;
+      if (Number.isFinite(yeni)) setDakika(yeni);
+    };
+    const testIste = () => setAlarm(true);
+
+    window.addEventListener(OLAY_DEGISTI, sureDegisti);
+    window.addEventListener(OLAY_TEST, testIste);
+    return () => {
+      window.removeEventListener(OLAY_DEGISTI, sureDegisti);
+      window.removeEventListener(OLAY_TEST, testIste);
+    };
+  }, []);
 
   // --- Ana süre sayacı ---
   useEffect(() => {
@@ -84,76 +120,9 @@ export default function GuvenlikKatmani({ admin = false }) {
     return () => clearInterval(sayacRef.current);
   }, [alarm]);
 
-  const sureyiKaydet = useCallback((yeni) => {
-    const sayi = Math.max(1, Math.min(240, parseInt(yeni, 10) || VARSAYILAN_DAKIKA));
-    localStorage.setItem(AYAR_ANAHTARI, String(sayi));
-    setDakika(sayi);
-  }, []);
-
   return (
     <>
       <style>{ANIMASYON_CSS}</style>
-
-      {/* --- ADMIN AYARI --- */}
-      {admin && !alarm && (
-        <div style={{
-          position: 'absolute', left: 12, bottom: 12, zIndex: 1500,
-          background: 'rgba(15,23,42,0.92)', color: '#e2e8f0',
-          borderRadius: 10, padding: ayarAcik ? 12 : 0, fontSize: 12,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-        }}>
-          {!ayarAcik ? (
-            <button
-              onClick={() => setAyarAcik(true)}
-              title="Güvenlik oturum süresi"
-              style={{
-                background: '#334155', color: '#cbd5e1', border: 'none',
-                borderRadius: 10, padding: '7px 11px', cursor: 'pointer', fontSize: 12,
-              }}
-            >
-              🛡️ {dakika} dk
-            </button>
-          ) : (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <b>🛡️ Güvenlik Süresi</b>
-                <button
-                  onClick={() => setAyarAcik(false)}
-                  style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 16 }}
-                >×</button>
-              </div>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <input
-                  type="number"
-                  min="1"
-                  max="240"
-                  defaultValue={dakika}
-                  onBlur={(e) => sureyiKaydet(e.target.value)}
-                  style={{
-                    width: 70, padding: 6, borderRadius: 6,
-                    background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155',
-                  }}
-                />
-                <span style={{ color: '#94a3b8' }}>dakika</span>
-              </div>
-              <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 6, lineHeight: 1.5 }}>
-                Bu süre dolduğunda güvenlik katmanı devreye girer
-                ve oturum kapatılır.
-              </div>
-              <button
-                onClick={() => setAlarm(true)}
-                style={{
-                  width: '100%', marginTop: 8, padding: 6, borderRadius: 6,
-                  background: '#7f1d1d', color: '#fecaca', border: 'none',
-                  cursor: 'pointer', fontSize: 11,
-                }}
-              >
-                Şimdi test et
-              </button>
-            </>
-          )}
-        </div>
-      )}
 
       {/* --- ALARM EKRANI --- */}
       {alarm && (
