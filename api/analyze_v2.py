@@ -53,20 +53,26 @@ ORTAK_OLCEK = 10          # cizilen alan icin (v1 ile ayni)
 BOLGESEL_OLCEK = 60       # bolgesel istatistik icin - kaba yeter, cok daha hizli
 BOLGESEL_TAMPON = 25000   # metre
 
-# MUTLAK sinif esikleri, HASSASIYET seviyesine gore.
-# v1'de esikler alanin kendi yuzdeliklerinden geliyordu (hep bir seyler bulunurdu).
-# v2'de esikler SABIT: skor bolgesel dagilima gore normalize edildigi icin
-# 0.60 demek "bu bolgenin ust dilimlerinde" demek.
+# SINIF ESIKLERI ARTIK SABIT SAYI DEGIL, BOLGESEL YUZDELIK.
 #
-# NOT: ilk denemede tek bir sabit esik seti kullanmistim (1.sinif = 0.55) ve
-# hicbir yerde poligon uretmedi. Sebebi: bir pikselin o esige ulasmasi icin
-# UC indeksin de bolgesel p95'e yakin olmasi gerekiyordu, ama indeksler
-# gerçekte bu kadar birlikte hareket etmiyor. Simdi hem esikler dusuruldu
-# hem de kullanici hassasiyeti degistirebiliyor.
-HASSASIYET_ESIKLERI = {
-    'yuksek': {1: 0.30, 2: 0.40, 3: 0.50, 4: 0.62},   # cok sinyal, cok gurultu
-    'orta':   {1: 0.40, 2: 0.50, 3: 0.60, 4: 0.72},   # varsayilan
-    'dusuk':  {1: 0.50, 2: 0.60, 3: 0.70, 4: 0.82},   # sadece en guclu olanlar
+# Neden degistirdim: onceki iki denemede esikleri elle sabit sayi olarak
+# verdim (0.55, sonra 0.40) ve ikisinde de sifir poligon cikti. Sebep,
+# skorun gercek dagilimini bilmeden rakam uydurmamdi.
+#
+# Simdi esik VERIDEN geliyor. Ama kritik ayrim su:
+#
+#   v1  -> yuzdelikleri CIZILEN ALANDAN aliyordu. Bu yuzden siradan bir
+#          tarlada bile mutlaka "en yuksek %10" bulunuyordu. Her zaman
+#          bir seyler cikardi, cikanlarin anlami yoktu.
+#
+#   v2  -> yuzdelikleri CEVREDEKI ~25 KM'LIK BOLGEDEN aliyor. "Bolgenin
+#          en ust %10'u" anlamli bir cubuk. Cizilen alan bu cubugu bol bol
+#          gecebilir de, hic gecmeyebilir de. Kendi kendini kalibre ediyor
+#          ama bolgesel karsilastirma korunuyor.
+HASSASIYET_YUZDELIK = {
+    'yuksek': [70, 84, 93, 98],    # bolgenin ust %30'u zayif sinif sayilir
+    'orta':   [85, 93, 97, 99],    # varsayilan
+    'dusuk':  [93, 97, 99, 100],   # sadece bolgenin en ust dilimleri
 }
 
 _ee_hazir = False
@@ -119,7 +125,7 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
     gee_baslat()
 
     agirliklar = MINERAL_PROFILLERI.get(hedef_mineral, MINERAL_PROFILLERI['altin'])
-    esikler = HASSASIYET_ESIKLERI.get(hassasiyet, HASSASIYET_ESIKLERI['orta'])
+    yuzdelikler = HASSASIYET_YUZDELIK.get(hassasiyet, HASSASIYET_YUZDELIK['orta'])
 
     kord_listesi = [[k['lng'], k['lat']] for k in koordinatlar]
     aoi = ee.Geometry.Polygon([kord_listesi])
@@ -255,16 +261,47 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
     ).reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
 
     # -----------------------------------------------------------------
-    # TEŞHİS: gerçek skor dağılımı
+    # EŞİKLERİ BÖLGEDEN TÜRET
     # -----------------------------------------------------------------
-    # Eşiği tahminle ayarlamak yerine, alanda gerçekte hangi skorların
-    # olduğunu ölçüp geri döndürüyoruz. Sıfır sonuç çıktığında "eşik mi
-    # yüksek, gerçekten mi bir şey yok" sorusu böylece cevaplanabiliyor.
-    skor_dagilim = nihai_puruzsuz.addBands(kararlilik).updateMask(gecerliMaske) \
+    # Skorun yüzdeliklerini ÇİZİLEN ALANDAN değil, çevresindeki 25 km'lik
+    # bölgeden alıyoruz. Böylece "yüksek" = "bu bölge için alışılmadık".
+    #
+    # Ölçek BOLGESEL_OLCEK (60 m): bölgesel arka plan dağılımını belirlemek
+    # için 10 m gereksiz ve çok pahalı.
+    bolgesel_skor = nihai_puruzsuz.updateMask(gecerliMaske).reduceRegion(
+        reducer=ee.Reducer.percentile(yuzdelikler),
+        geometry=bolge, crs=ORTAK_CRS, scale=BOLGESEL_OLCEK,
+        maxPixels=1e10, bestEffort=True, tileScale=4,
+    ).getInfo()
+
+    esikler = {}
+    for sira, yuzde in enumerate(yuzdelikler, start=1):
+        deger = bolgesel_skor.get(f'skor_p{yuzde}')
+        esikler[sira] = round(float(deger), 4) if deger is not None else None
+
+    if esikler.get(1) is None:
+        raise RuntimeError(
+            "Bölgesel referans hesaplanamadı. Çevredeki 25 km'lik alanda "
+            "yeterli çıplak zemin pikseli bulunamadı olabilir."
+        )
+
+    # Eşikler artan sırada olmalı; veri dağılımı düz olduğunda eşit çıkabilir,
+    # o zaman üst sınıflar hiç oluşmaz. Küçük bir ayrım koyuyoruz.
+    for sira in (2, 3, 4):
+        if esikler.get(sira) is None or esikler[sira] <= esikler[sira - 1]:
+            esikler[sira] = round(esikler[sira - 1] + 0.001, 4)
+
+    # -----------------------------------------------------------------
+    # TEŞHİS: çizilen alandaki gerçek skor dağılımı
+    # -----------------------------------------------------------------
+    # Eşikle karşılaştırmak için. Aynı reduceRegion makinesi, aynı ölçek —
+    # önceki sürümde yüzdelik ile sayım farklı ölçeklerde çalıştığı için
+    # "p99 = 0.574 ama eşiği geçen piksel 9" gibi çelişkili sonuç çıkıyordu.
+    alan_skor = nihai_puruzsuz.addBands(kararlilik).updateMask(gecerliMaske) \
         .reduceRegion(
-            reducer=ee.Reducer.percentile([50, 75, 90, 95, 99]).combine(
+            reducer=ee.Reducer.percentile([50, 90, 99]).combine(
                 reducer2=ee.Reducer.max(), sharedInputs=True),
-            geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK,
+            geometry=aoi, crs=ORTAK_CRS, scale=BOLGESEL_OLCEK,
             maxPixels=1e10, bestEffort=True, tileScale=4,
         ).getInfo()
 
@@ -272,21 +309,19 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
         return round(x, 3) if isinstance(x, (int, float)) else None
 
     teshis_skor = {
-        'p50': yuvarla(skor_dagilim.get('skor_p50')),
-        'p75': yuvarla(skor_dagilim.get('skor_p75')),
-        'p90': yuvarla(skor_dagilim.get('skor_p90')),
-        'p95': yuvarla(skor_dagilim.get('skor_p95')),
-        'p99': yuvarla(skor_dagilim.get('skor_p99')),
-        'max': yuvarla(skor_dagilim.get('skor_max')),
+        'p50': yuvarla(alan_skor.get('skor_p50')),
+        'p90': yuvarla(alan_skor.get('skor_p90')),
+        'p99': yuvarla(alan_skor.get('skor_p99')),
+        'max': yuvarla(alan_skor.get('skor_max')),
     }
     teshis_kararlilik = {
-        'p50': yuvarla(skor_dagilim.get('kararlilik_p50')),
-        'p90': yuvarla(skor_dagilim.get('kararlilik_p90')),
-        'max': yuvarla(skor_dagilim.get('kararlilik_max')),
+        'p50': yuvarla(alan_skor.get('kararlilik_p50')),
+        'p90': yuvarla(alan_skor.get('kararlilik_p90')),
+        'max': yuvarla(alan_skor.get('kararlilik_max')),
     }
 
     # -----------------------------------------------------------------
-    # SINIFLANDIRMA — MUTLAK EŞİKLERLE
+    # SINIFLANDIRMA
     # -----------------------------------------------------------------
     siniflandirilmis = ee.Image(0) \
         .where(nihai_puruzsuz.gt(esikler[1]), 1) \
@@ -350,7 +385,7 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
         return f.setGeometry(g).set('alan_m2', g.area(10))
 
     vektorler = vektorler.map(kenariYumusat) \
-        .filter(ee.Filter.gte('alan_m2', 800))   # ~8 piksel; altı gürültü
+        .filter(ee.Filter.gte('alan_m2', 400))   # ~4 piksel; altı gürültü
 
     sonuc_geojson = vektorler.getInfo()
     poligon_sayisi = len(sonuc_geojson.get('features') or [])
@@ -362,6 +397,7 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
             'gecerli_piksel': gecerli_piksel,
             'anomali_piksel': anomali_piksel,
             'hassasiyet': hassasiyet,
+            'yuzdelikler': yuzdelikler,
             'esikler': esikler,
             'skor_dagilimi': teshis_skor,
             'kararlilik_dagilimi': teshis_kararlilik,
@@ -382,6 +418,7 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
         'gecerli_piksel': gecerli_piksel,
         'anomali_piksel': anomali_piksel,
         'hassasiyet': hassasiyet,
+        'yuzdelikler': yuzdelikler,
         'esikler': esikler,
         'skor_dagilimi': teshis_skor,
         'kararlilik_dagilimi': teshis_kararlilik,

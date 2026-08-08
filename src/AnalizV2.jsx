@@ -19,9 +19,9 @@ const MINERALLER = [
 ];
 
 const HASSASIYETLER = [
-  { deger: 'yuksek', etiket: 'Yüksek', aciklama: 'Çok sinyal, çok gürültü' },
-  { deger: 'orta', etiket: 'Orta', aciklama: 'Dengeli — varsayılan' },
-  { deger: 'dusuk', etiket: 'Düşük', aciklama: 'Sadece en güçlü anomaliler' },
+  { deger: 'yuksek', etiket: 'Yüksek', aciklama: 'Bölgenin üst %30\'u — çok sinyal' },
+  { deger: 'orta', etiket: 'Orta', aciklama: 'Bölgenin üst %15\'i — varsayılan' },
+  { deger: 'dusuk', etiket: 'Düşük', aciklama: 'Bölgenin üst %7\'si — en güçlüler' },
 ];
 
 const SINIF_RENK = { 1: '#22c55e', 2: '#eab308', 3: '#f97316', 4: '#dc2626' };
@@ -222,10 +222,14 @@ export default function AnalizV2({ ciziliAlan }) {
                     borderTop: '1px solid #334155', paddingTop: 8, marginBottom: 8,
                     fontSize: 11, lineHeight: 1.7,
                   }}>
-                    <b style={{ color: '#cbd5e1' }}>Skor dağılımı (teşhis)</b>
+                    <b style={{ color: '#cbd5e1' }}>Teşhis</b>
+                    <div style={{ color: '#64748b', marginBottom: 3 }}>
+                      Eşikler çevredeki 25 km'lik bölgenin
+                      %{sonuc.yuzdelikler?.[0]} diliminden alındı
+                    </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>1. sınıf eşiği</span>
-                      <b style={{ color: '#f59e0b' }}>{sonuc.esikler?.['1']}</b>
+                      <b style={{ color: '#f59e0b' }}>{sonuc.esikler?.['1'] ?? '—'}</b>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>Alandaki en yüksek</span>
@@ -235,9 +239,9 @@ export default function AnalizV2({ ciziliAlan }) {
                       }}>{sonuc.skor_dagilimi.max ?? '—'}</b>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8' }}>
-                      <span>p99 / p95 / p90</span>
+                      <span>Alan p99 / p90 / p50</span>
                       <span>
-                        {sonuc.skor_dagilimi.p99 ?? '—'} / {sonuc.skor_dagilimi.p95 ?? '—'} / {sonuc.skor_dagilimi.p90 ?? '—'}
+                        {sonuc.skor_dagilimi.p99 ?? '—'} / {sonuc.skor_dagilimi.p90 ?? '—'} / {sonuc.skor_dagilimi.p50 ?? '—'}
                       </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8' }}>
