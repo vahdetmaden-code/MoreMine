@@ -69,7 +69,12 @@ function v2Bilgi(feature, layer) {
   );
 }
 
-export default function AnalizV2({ ciziliAlan, konumAdi = null, onKaydedildi = null }) {
+export default function AnalizV2({
+  ciziliAlan,
+  konumAdi = null,
+  onKaydedildi = null,
+  filtre = null,          // { v2: bool, siniflar: number[] } — KatmanKontrol'den gelir
+}) {
   const [acik, setAcik] = useState(false);
   const [mineral, setMineral] = useState('altin');
   const [yerlesimMaskesi, setYerlesimMaskesi] = useState(true);
@@ -165,14 +170,65 @@ export default function AnalizV2({ ciziliAlan, konumAdi = null, onKaydedildi = n
     }
   }, [ciziliAlan, alanHazir, mineral, yerlesimMaskesi, hassasiyet, konumAdi, onKaydedildi]);
 
-  const poligonSayisi = sonuc?.sonuc?.features?.length ?? 0;
+  /*
+   * Leaflet'e verilmeden önce geometriyi TEMİZLE.
+   *
+   * Sunucu tarafında simplify() bazı ince poligonları boş/geçersiz
+   * geometriye düşürebiliyor. Leaflet böyle bir şey görünce render
+   * sırasında hata fırlatıyor ve React yakalanmamış hatada TÜM ağacı
+   * söküyor — ekran bembeyaz kalıyor. Bu yüzden bozuk kayıtları
+   * haritaya hiç göndermiyoruz.
+   */
+  const temizSonuc = (() => {
+    const ham = sonuc?.sonuc;
+    if (!ham || !Array.isArray(ham.features)) return null;
+
+    const gecerli = ham.features.filter((o) => {
+      const g = o?.geometry;
+      if (!g || !g.type || !Array.isArray(g.coordinates)) return false;
+      if (g.coordinates.length === 0) return false;
+      // Polygon: dış halka en az 4 nokta olmalı (kapalı halka)
+      // Koordinat ARALIĞI da kontrol ediliyor, sadece "sayı mı" diye değil.
+      // Bir poligonun koordinatı derece yerine metre cinsinden gelirse
+      // (ör. EPSG:3857 değerleri) Leaflet onu dünya ölçeğinde devasa çizer
+      // ve tüm harita o poligonun rengiyle kaplanır — "zemin sarı oldu"
+      // sorununun sebebi buydu.
+      const noktaGecerli = (n) =>
+        Array.isArray(n) && n.length >= 2
+        && Number.isFinite(n[0]) && Number.isFinite(n[1])
+        && n[0] >= -180 && n[0] <= 180      // boylam
+        && n[1] >= -90 && n[1] <= 90;       // enlem
+
+      if (g.type === 'Polygon') {
+        const halka = g.coordinates[0];
+        return Array.isArray(halka) && halka.length >= 4 && halka.every(noktaGecerli);
+      }
+      if (g.type === 'MultiPolygon') {
+        return g.coordinates.some((poly) =>
+          Array.isArray(poly) && Array.isArray(poly[0])
+          && poly[0].length >= 4 && poly[0].every(noktaGecerli));
+      }
+      return false;
+    });
+
+    // Katman kontrolünden gelen sınıf filtresini uygula
+    const siniflar = filtre?.siniflar;
+    const suzulmus = Array.isArray(siniflar)
+      ? gecerli.filter((o) => siniflar.includes(Number(o.properties?.sinif)))
+      : gecerli;
+
+    return { type: 'FeatureCollection', features: suzulmus };
+  })();
+
+  const poligonSayisi = temizSonuc?.features?.length ?? 0;
+  const elenenPoligon = (sonuc?.sonuc?.features?.length ?? 0) - poligonSayisi;
 
   return (
     <>
-      {sonuc && gorunur && poligonSayisi > 0 && (
+      {gorunur && (filtre?.v2 !== false) && poligonSayisi > 0 && temizSonuc && (
         <GeoJSON
-          key={`v2-${mineral}-${hassasiyet}-${poligonSayisi}-${yerlesimMaskesi}`}
-          data={sonuc.sonuc}
+          key={`v2-${mineral}-${hassasiyet}-${poligonSayisi}-${yerlesimMaskesi}-${(filtre?.siniflar || []).join('')}`}
+          data={temizSonuc}
           style={v2Stil}
           onEachFeature={v2Bilgi}
         />
@@ -397,6 +453,11 @@ export default function AnalizV2({ ciziliAlan, konumAdi = null, onKaydedildi = n
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>Kullanılan görüntü</span><b>{sonuc.goruntu_sayisi}</b>
                     </div>
+                    {elenenPoligon > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#f59e0b' }}>
+                        <span>Bozuk geometri (atlandı)</span><b>{elenenPoligon}</b>
+                      </div>
+                    )}
                   </div>
                 )}
 

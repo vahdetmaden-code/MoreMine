@@ -9,6 +9,7 @@ import Harita3D from './Harita3D';
 import ManyetikKatman from './ManyetikKatman';
 import AnalizV2 from './AnalizV2';
 import GuvenlikKatmani from './GuvenlikKatmani';
+import KatmanKontrol, { VARSAYILAN_FILTRE } from './KatmanKontrol';
 
 // Sınıf değerine göre renk (motor.py / api/analyze.py ile birebir aynı olmalı)
 const RENKLER = {
@@ -237,6 +238,7 @@ function KonumTespiti({ tetikleyici }) {
 function AnaUygulama({ oturum, rol }) {
   const [ciziliAlan, setCiziliAlan] = useState(null);
   const [sonuc, setSonuc] = useState(null);
+  const [katmanFiltre, setKatmanFiltre] = useState(VARSAYILAN_FILTRE);
   const [sonucGorunur, setSonucGorunur] = useState(true);
   const [odaklanilacakAlan, setOdaklanilacakAlan] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
@@ -842,10 +844,11 @@ function AnaUygulama({ oturum, rol }) {
             <HaritaOdakla hedef={odaklanilacakAlan} />
             <CanliKonumKatmani aktif={canliKonumAktif} />
             <CizimAraci onAlanCizildi={alanCizildi} />
-            {sonuc && sonucGorunur && <GeoJSON key={JSON.stringify(sonuc).length} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} />}
+            {sonuc && sonucGorunur && katmanFiltre.v1 && <GeoJSON key={JSON.stringify(sonuc).length + '-' + katmanFiltre.siniflar.join('')} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} filter={(f) => katmanFiltre.siniflar.includes(Number(f.properties.sinif))} />}
             <ManyetikKatman ciziliAlan={ciziliAlan} optikSonuc={sonuc} taramaId={null} />
-<AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} />
-   <GuvenlikKatmani rol={rol} />
+            <AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} filtre={katmanFiltre} />
+            <KatmanKontrol deger={katmanFiltre} onChange={setKatmanFiltre} />
+            <GuvenlikKatmani rol={rol} />
           </MapContainer>
 
           {/* EVRE 1: UYDU KONUMA YÖNELİYOR */}
