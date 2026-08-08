@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from './supabaseClient';
 
 /*
@@ -9,26 +9,54 @@ import { supabase } from './supabaseClient';
  * Sistem belirlenen süre kadar açık kaldığında ekranın tamamını kaplayan
  * kırmızı alarm devreye girer, geri sayım biter ve oturum kapatılır.
  *
- * Süre admin tarafından panelden değiştirilebilir (localStorage'da tutulur).
+ * Süre admin panelinden rol bazlı ayarlanır (Supabase 'ayarlar' tablosu).
  */
 
-const VARSAYILAN_DAKIKA = 15;
+const VARSAYILAN = { admin: 60, kullanici: 15 };
 const GERI_SAYIM_SANIYE = 8;
-export const AYAR_ANAHTARI = 'moremine_guvenlik_dakika';
+
+export const ANAHTAR = {
+  admin: 'guvenlik_dakika_admin',
+  kullanici: 'guvenlik_dakika_kullanici',
+};
 export const OLAY_DEGISTI = 'moremine-guvenlik-degisti';
 export const OLAY_TEST = 'moremine-guvenlik-test';
 
-// Admin panelinin çağıracağı yardımcılar.
-// Böylece AdminPaneli.jsx, GuvenlikKatmani'nın iç yapısını bilmek zorunda kalmıyor.
-export function guvenlikSuresiniOku() {
-  const kayitli = parseInt(localStorage.getItem(AYAR_ANAHTARI), 10);
-  return Number.isFinite(kayitli) && kayitli > 0 ? kayitli : VARSAYILAN_DAKIKA;
+/*
+ * Ayarlar Supabase'deki "ayarlar" tablosunda tutuluyor, localStorage'da DEĞİL.
+ * Sebep: localStorage tarayıcıya özeldir. Admin kendi tarayıcısında bir süre
+ * ayarlasa bile o ayar kullanıcılara hiç ulaşmazdı — rol bazlı ayrım da
+ * bu yüzden imkânsızdı.
+ */
+
+export async function guvenlikSurelerimiOku() {
+  const { data, error } = await supabase
+    .from('ayarlar')
+    .select('anahtar, deger')
+    .in('anahtar', [ANAHTAR.admin, ANAHTAR.kullanici]);
+
+  const sonuc = { admin: VARSAYILAN.admin, kullanici: VARSAYILAN.kullanici };
+  if (error || !data) return sonuc;
+
+  for (const satir of data) {
+    const sayi = parseInt(satir.deger, 10);
+    if (!Number.isFinite(sayi) || sayi <= 0) continue;
+    if (satir.anahtar === ANAHTAR.admin) sonuc.admin = sayi;
+    if (satir.anahtar === ANAHTAR.kullanici) sonuc.kullanici = sayi;
+  }
+  return sonuc;
 }
 
-export function guvenlikSuresiniYaz(dakika) {
-  const sayi = Math.max(1, Math.min(240, parseInt(dakika, 10) || VARSAYILAN_DAKIKA));
-  localStorage.setItem(AYAR_ANAHTARI, String(sayi));
-  window.dispatchEvent(new CustomEvent(OLAY_DEGISTI, { detail: { dakika: sayi } }));
+export async function guvenlikSuresiniYaz(rolAnahtari, dakika) {
+  const sayi = Math.max(1, Math.min(240, parseInt(dakika, 10) || VARSAYILAN.kullanici));
+  const { error } = await supabase
+    .from('ayarlar')
+    .upsert(
+      { anahtar: rolAnahtari, deger: String(sayi), guncelleme: new Date().toISOString() },
+      { onConflict: 'anahtar' },
+    );
+  if (error) throw new Error(error.message);
+  window.dispatchEvent(new CustomEvent(OLAY_DEGISTI));
   return sayi;
 }
 
@@ -68,22 +96,27 @@ const ANIMASYON_CSS = `
 }
 `;
 
-export default function GuvenlikKatmani() {
-  const [dakika, setDakika] = useState(() => {
-    const kayitli = parseInt(localStorage.getItem(AYAR_ANAHTARI), 10);
-    return Number.isFinite(kayitli) && kayitli > 0 ? kayitli : VARSAYILAN_DAKIKA;
-  });
+export default function GuvenlikKatmani({ rol = 'kullanici' }) {
+  const adminMi = rol === 'admin';
+  // null = henüz okunmadı; okunmadan sayaç başlatmıyoruz ki yanlış süreyle
+  // erken alarm çalmasın.
+  const [dakika, setDakika] = useState(null);
   const [alarm, setAlarm] = useState(false);
   const [kalan, setKalan] = useState(GERI_SAYIM_SANIYE);
   const sayacRef = useRef(null);
 
+  // --- Süreyi Supabase'den oku (rol'e göre) ---
+  const sureyiYukle = useCallback(async () => {
+    const sureler = await guvenlikSurelerimiOku();
+    setDakika(adminMi ? sureler.admin : sureler.kullanici);
+  }, [adminMi]);
+
+  useEffect(() => { sureyiYukle(); }, [sureyiYukle]);
+
   // --- Admin panelinden gelen değişiklikleri dinle ---
   // Sayfayı yenilemeden süre değişikliği ve test tetiklemesi çalışsın diye.
   useEffect(() => {
-    const sureDegisti = (olay) => {
-      const yeni = olay?.detail?.dakika;
-      if (Number.isFinite(yeni)) setDakika(yeni);
-    };
+    const sureDegisti = () => { sureyiYukle(); };
     const testIste = () => setAlarm(true);
 
     window.addEventListener(OLAY_DEGISTI, sureDegisti);
@@ -92,11 +125,11 @@ export default function GuvenlikKatmani() {
       window.removeEventListener(OLAY_DEGISTI, sureDegisti);
       window.removeEventListener(OLAY_TEST, testIste);
     };
-  }, []);
+  }, [sureyiYukle]);
 
   // --- Ana süre sayacı ---
   useEffect(() => {
-    if (alarm) return;
+    if (alarm || dakika == null) return;
     const zamanlayici = setTimeout(() => setAlarm(true), dakika * 60 * 1000);
     return () => clearTimeout(zamanlayici);
   }, [dakika, alarm]);

@@ -845,7 +845,7 @@ function AnaUygulama({ oturum, rol }) {
             {sonuc && sonucGorunur && <GeoJSON key={JSON.stringify(sonuc).length} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} />}
             <ManyetikKatman ciziliAlan={ciziliAlan} optikSonuc={sonuc} taramaId={null} />
             <AnalizV2 ciziliAlan={ciziliAlan} />
-            <GuvenlikKatmani />
+   <GuvenlikKatmani rol={rol} />
           </MapContainer>
 
           {/* EVRE 1: UYDU KONUMA YÖNELİYOR */}

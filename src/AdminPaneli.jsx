@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import {
-  guvenlikSuresiniOku,
+  ANAHTAR,
+  guvenlikSurelerimiOku,
   guvenlikSuresiniYaz,
   guvenlikAlarmiTestEt,
 } from './GuvenlikKatmani';
@@ -24,8 +25,9 @@ export default function AdminPaneli({ onKapat }) {
 
   // Güvenlik oturum süresi (dakika). GuvenlikKatmani ile localStorage
   // üzerinden paylaşılıyor; kaydedince olay yayınlanıp anında devreye giriyor.
-  const [guvenlikDakika, setGuvenlikDakika] = useState(() => guvenlikSuresiniOku());
-  const [guvenlikKaydedildi, setGuvenlikKaydedildi] = useState(false);
+  const [guvenlikSureler, setGuvenlikSureler] = useState({ admin: 60, kullanici: 15 });
+  const [guvenlikMesaj, setGuvenlikMesaj] = useState(null);
+  const [guvenlikHata, setGuvenlikHata] = useState(null);
 
   const veriYukle = async () => {
     setYukleniyor(true);
@@ -114,7 +116,7 @@ export default function AdminPaneli({ onKapat }) {
           <button onClick={() => setSekme('kullanicilar')} style={{ padding: '8px 14px', borderRadius: '8px 8px 0 0', border: 'none', background: sekme === 'kullanicilar' ? '#1e293b' : 'transparent', color: 'white', cursor: 'pointer', fontSize: '13px' }}>Kullanıcılar</button>
           <button onClick={() => setSekme('ekle')} style={{ padding: '8px 14px', borderRadius: '8px 8px 0 0', border: 'none', background: sekme === 'ekle' ? '#1e293b' : 'transparent', color: 'white', cursor: 'pointer', fontSize: '13px' }}>Kullanıcı Ekle</button>
           <button onClick={() => setSekme('taramalar')} style={{ padding: '8px 14px', borderRadius: '8px 8px 0 0', border: 'none', background: sekme === 'taramalar' ? '#1e293b' : 'transparent', color: 'white', cursor: 'pointer', fontSize: '13px' }}>Tüm Taramalar</button>
-          <button onClick={() => setSekme('guvenlik')} style={{ padding: '8px 14px', borderRadius: '8px 8px 0 0', border: 'none', background: sekme === 'guvenlik' ? '#1e293b' : 'transparent', color: 'white', cursor: 'pointer', fontSize: '13px' }}>Güvenlik</button>
+          <button onClick={async () => { setSekme('guvenlik'); setGuvenlikSureler(await guvenlikSurelerimiOku()); }} style={{ padding: '8px 14px', borderRadius: '8px 8px 0 0', border: 'none', background: sekme === 'guvenlik' ? '#1e293b' : 'transparent', color: 'white', cursor: 'pointer', fontSize: '13px' }}>Güvenlik</button>
         </div>
 
         <div style={{ padding: '20px 22px', overflowY: 'auto', flex: 1 }}>
@@ -232,63 +234,80 @@ export default function AdminPaneli({ onKapat }) {
           )}
 
           {!yukleniyor && sekme === 'guvenlik' && (
-            <div style={{ color: 'white', fontSize: '13px', maxWidth: '460px' }}>
+            <div style={{ color: 'white', fontSize: '13px', maxWidth: '520px' }}>
               <div style={{ fontWeight: 700, marginBottom: '6px' }}>Oturum Süresi</div>
-              <div style={{ color: '#94a3b8', lineHeight: 1.6, marginBottom: '14px' }}>
+              <div style={{ color: '#94a3b8', lineHeight: 1.6, marginBottom: '16px' }}>
                 Sistem bu süre kadar açık kaldığında güvenlik katmanı devreye
-                girer ve oturum otomatik olarak kapatılır.
+                girer ve oturum otomatik kapatılır. Ayar sunucuda tutulur,
+                tüm kullanıcılara uygulanır.
               </div>
 
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
-                <input
-                  type="number"
-                  min="1"
-                  max="240"
-                  value={guvenlikDakika}
-                  onChange={(e) => { setGuvenlikDakika(e.target.value); setGuvenlikKaydedildi(false); }}
-                  style={{ width: '90px', padding: '8px', borderRadius: '6px', background: '#0f172a', color: 'white', border: '1px solid #334155', fontSize: '13px' }}
-                />
-                <span style={{ color: '#94a3b8' }}>dakika</span>
-                <button
-                  onClick={() => {
-                    const kaydedilen = guvenlikSuresiniYaz(guvenlikDakika);
-                    setGuvenlikDakika(kaydedilen);
-                    setGuvenlikKaydedildi(true);
-                    setTimeout(() => setGuvenlikKaydedildi(false), 2500);
-                  }}
-                  style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: '#2563eb', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
-                >
-                  Kaydet
-                </button>
-                {guvenlikKaydedildi && (
-                  <span style={{ color: '#4ade80', fontSize: '12px' }}>Kaydedildi</span>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', gap: '10px', marginBottom: '14px' }}>
-                {[5, 15, 30, 60].map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => { setGuvenlikDakika(guvenlikSuresiniYaz(d)); setGuvenlikKaydedildi(true); setTimeout(() => setGuvenlikKaydedildi(false), 2500); }}
-                    style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #334155', background: Number(guvenlikDakika) === d ? '#1e293b' : 'transparent', color: '#cbd5e1', cursor: 'pointer', fontSize: '12px' }}
-                  >
-                    {d} dk
-                  </button>
-                ))}
-              </div>
-
-              <div style={{ borderTop: '1px solid #1e293b', paddingTop: '14px' }}>
-                <div style={{ color: '#94a3b8', lineHeight: 1.6, marginBottom: '10px' }}>
-                  Alarmı beklemeden görmek için test edebilirsin. Test, oturumu
-                  gerçekten kapatır — tekrar giriş yapman gerekir.
+              {[
+                { anahtar: ANAHTAR.admin, alan: 'admin', baslik: 'Adminler', renk: '#f97316' },
+                { anahtar: ANAHTAR.kullanici, alan: 'kullanici', baslik: 'Kullanıcılar', renk: '#3b82f6' },
+              ].map((satir) => (
+                <div key={satir.alan} style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid #1e293b' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    <span style={{ display: 'inline-block', width: '9px', height: '9px', borderRadius: '50%', background: satir.renk }} />
+                    <b>{satir.baslik}</b>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      type="number"
+                      min="1"
+                      max="240"
+                      value={guvenlikSureler[satir.alan]}
+                      onChange={(e) => setGuvenlikSureler((o) => ({ ...o, [satir.alan]: e.target.value }))}
+                      style={{ width: '90px', padding: '8px', borderRadius: '6px', background: '#0f172a', color: 'white', border: '1px solid #334155', fontSize: '13px' }}
+                    />
+                    <span style={{ color: '#94a3b8' }}>dakika</span>
+                    <button
+                      onClick={async () => {
+                        setGuvenlikHata(null);
+                        try {
+                          const kaydedilen = await guvenlikSuresiniYaz(satir.anahtar, guvenlikSureler[satir.alan]);
+                          setGuvenlikSureler((o) => ({ ...o, [satir.alan]: kaydedilen }));
+                          setGuvenlikMesaj(satir.baslik + ' süresi ' + kaydedilen + ' dakika olarak kaydedildi.');
+                          setTimeout(() => setGuvenlikMesaj(null), 3000);
+                        } catch (e) {
+                          setGuvenlikHata(e.message);
+                        }
+                      }}
+                      style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: '#2563eb', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                    >
+                      Kaydet
+                    </button>
+                    {[5, 15, 30, 60, 120].map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => setGuvenlikSureler((o) => ({ ...o, [satir.alan]: d }))}
+                        style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #334155', background: Number(guvenlikSureler[satir.alan]) === d ? '#1e293b' : 'transparent', color: '#cbd5e1', cursor: 'pointer', fontSize: '12px' }}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <button
-                  onClick={guvenlikAlarmiTestEt}
-                  style={{ padding: '9px 18px', borderRadius: '6px', border: 'none', background: '#b91c1c', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
-                >
-                  Alarmı Şimdi Test Et
-                </button>
+              ))}
+
+              {guvenlikMesaj && (
+                <div style={{ color: '#4ade80', marginBottom: '10px' }}>{guvenlikMesaj}</div>
+              )}
+              {guvenlikHata && (
+                <div style={{ color: '#f87171', marginBottom: '10px' }}>Kaydedilemedi: {guvenlikHata}</div>
+              )}
+
+              <div style={{ color: '#94a3b8', lineHeight: 1.6, marginBottom: '10px' }}>
+                Yeni süre, kullanıcı bir sonraki sayfa açılışında geçerli olur.
+                Alarmı beklemeden görmek için test edebilirsin — test oturumu
+                gerçekten kapatır.
               </div>
+              <button
+                onClick={guvenlikAlarmiTestEt}
+                style={{ padding: '9px 18px', borderRadius: '6px', border: 'none', background: '#b91c1c', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+              >
+                Alarmı Şimdi Test Et
+              </button>
             </div>
           )}
         </div>
