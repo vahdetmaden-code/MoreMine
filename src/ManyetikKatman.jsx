@@ -26,8 +26,8 @@ const BAGLAM_RENK = {
   'gradyan kusagi': '#a855f7',   // mor — yapısal sınır, altın/bakır için en ilginç
   'manyetik yuksek': '#0ea5e9',  // mavi — manyetit zengini
   'manyetik dusuk': '#64748b',   // gri-mavi — manyetit kaybı olabilir
-  'notr': 'transparent',
-  'veri yok': 'transparent',
+  'notr': '#94a3b8',             // açık gri — kayda değer bir şey yok
+  'veri yok': '#dc2626',         // kırmızı — o konumda manyetik veri yok
 };
 
 const BAGLAM_ETIKET = {
@@ -79,12 +79,14 @@ function gridBilgi(feature, layer) {
 
 function cerceveStil(feature) {
   const baglam = feature.properties.manyetik_baglam;
-  const renk = BAGLAM_RENK[baglam] || 'transparent';
   const belirgin = baglam === 'gradyan kusagi' || baglam === 'manyetik yuksek';
+  // Kayda deger olmayan poligonlara da INCE bir cerceve ciziyoruz.
+  // Aksi halde "manyetik olarak ilginc bir sey yok" ile "katman calismiyor"
+  // birbirinden ayirt edilemiyor.
   return {
-    color: renk,
-    weight: belirgin ? 4 : 0,
-    opacity: belirgin ? 0.95 : 0,
+    color: BAGLAM_RENK[baglam] || '#94a3b8',
+    weight: belirgin ? 4 : 1.5,
+    opacity: belirgin ? 0.95 : 0.5,
     fill: false,           // dolgu YOK — dolgu optik katmanın işi
     dashArray: baglam === 'manyetik yuksek' ? '6 4' : null,
   };
@@ -92,10 +94,10 @@ function cerceveStil(feature) {
 
 function cerceveBilgi(feature, layer) {
   const p = feature.properties;
-  if (!p.manyetik_baglam || p.manyetik_baglam === 'veri yok') return;
+  if (!p.manyetik_baglam) return;
   layer.bindTooltip(
-    `<b>${BAGLAM_ETIKET[p.manyetik_baglam]}</b><br/>` +
-    `Manyetik: ${p.manyetik_deger} nT<br/>` +
+    `<b>${BAGLAM_ETIKET[p.manyetik_baglam] || p.manyetik_baglam}</b><br/>` +
+    `Manyetik: ${p.manyetik_deger ?? '—'} nT<br/>` +
     `Birleşik skor: ${p.birlesik_skor ?? '—'}<br/>` +
     `<i>${p.yorum || ''}</i>`
   );
@@ -149,6 +151,18 @@ export default function ManyetikKatman({ ciziliAlan, optikSonuc, taramaId }) {
       setYukleniyor(false);
     }
   }, [ciziliAlan, alanHazir, optikSonuc, taramaId, profil]);
+
+  // Poligonların bağlam dağılımını say (panelde özet olarak gösterilir)
+  const dagilim = (() => {
+    const ozellikler = sonuc?.poligonlar?.features;
+    if (!ozellikler || !ozellikler.length) return null;
+    const sayilar = {};
+    for (const o of ozellikler) {
+      const ad = o.properties?.manyetik_baglam || 'bilinmiyor';
+      sayilar[ad] = (sayilar[ad] || 0) + 1;
+    }
+    return { toplam: ozellikler.length, sayilar };
+  })();
 
   return (
     <>
@@ -253,6 +267,47 @@ export default function ManyetikKatman({ ciziliAlan, optikSonuc, taramaId }) {
                     <span>Manyetik grid (gerçek boyut)</span>
                   </label>
                 </div>
+
+                {/* Poligonların hangi bağlama düştüğünü SAYI olarak göster.
+                    Böylece "hiçbir şey vurgulanmadı" ile "katman çalışmadı"
+                    birbirine karışmaz. */}
+                {!optikSonuc ? (
+                  <div style={{
+                    background: '#78350f', padding: 8, borderRadius: 6,
+                    marginBottom: 8, fontSize: 11.5, lineHeight: 1.5,
+                  }}>
+                    Optik tarama sonucu yok, bu yüzden çerçeve çizilemiyor.
+                    Önce normal taramayı çalıştır, sonra manyetik analizi tekrarla.
+                  </div>
+                ) : dagilim && (
+                  <div style={{
+                    borderTop: '1px solid #334155', paddingTop: 8,
+                    marginBottom: 8, fontSize: 11.5, lineHeight: 1.8,
+                  }}>
+                    <b style={{ color: '#cbd5e1' }}>Poligon dağılımı ({dagilim.toplam})</b>
+                    {Object.entries(dagilim.sayilar).map(([ad, adet]) => (
+                      <div key={ad} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>
+                          <span style={{
+                            display: 'inline-block', width: 10, height: 10,
+                            borderRadius: 2, marginRight: 6,
+                            background: BAGLAM_RENK[ad] || '#94a3b8',
+                          }} />
+                          {BAGLAM_ETIKET[ad] || ad}
+                        </span>
+                        <b>{adet}</b>
+                      </div>
+                    ))}
+                    {dagilim.sayilar['gradyan kusagi'] === undefined &&
+                     dagilim.sayilar['manyetik yuksek'] === undefined && (
+                      <div style={{ color: '#f59e0b', marginTop: 6, lineHeight: 1.5 }}>
+                        Bu alanda manyetik olarak öne çıkan poligon yok.
+                        Katman çalışıyor — vurgulanacak bir şey bulamadı.
+                        Daha geniş bir alan çizersen ayrışma görülebilir.
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div style={{ fontSize: 11, lineHeight: 1.7, marginBottom: 8 }}>
                   <div><span style={{ display: 'inline-block', width: 22, height: 3, background: '#a855f7', marginRight: 6, verticalAlign: 'middle' }} />Gradyan kuşağı — yapısal sınır</div>
