@@ -244,6 +244,12 @@ export default function AnalizV2({ ciziliAlan }) {
                       <span>Kararlılık (en yüksek)</span>
                       <span>%{Math.round((sonuc.kararlilik_dagilimi?.max ?? 0) * 100)}</span>
                     </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Eşiği geçen piksel</span>
+                      <b style={{ color: (sonuc.anomali_piksel ?? 0) > 0 ? '#22c55e' : '#dc2626' }}>
+                        {(sonuc.anomali_piksel ?? 0).toLocaleString('tr-TR')}
+                      </b>
+                    </div>
                   </div>
                 )}
 

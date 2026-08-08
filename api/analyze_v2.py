@@ -299,23 +299,24 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
         .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
 
     # --- Teşhis sayıları ---
-    sayimlar = ee.Image(1).rename('t') \
-        .addBands(gecerliMaske.selfMask().rename('g')) \
-        .addBands(siniflandirilmis.mask().selfMask().rename('a')) \
-        .reduceRegion(
+    # ÖNEMLİ: bunlar AYRI reduceRegion çağrılarıyla alınıyor.
+    # Önceki sürümde sabit bir görüntüye (ee.Image(1)) bant ekleyip tek çağrıda
+    # sayıyordum; sabit görüntünün kendi projeksiyonu olmadığı için sayım
+    # güvenilmez sonuç veriyordu ve anomali sayısı yanlışlıkla 0 çıkıyordu.
+    def piksel_say(maskeli_img):
+        sonuc = maskeli_img.selfMask().rename('n').reduceRegion(
             reducer=ee.Reducer.count(), geometry=aoi,
             crs=ORTAK_CRS, scale=ORTAK_OLCEK,
             maxPixels=1e10, bestEffort=True, tileScale=4,
         ).getInfo()
+        return sonuc.get('n') or 0
 
-    toplam_piksel = sayimlar.get('t') or 0
-    gecerli_piksel = sayimlar.get('g') or 0
-    anomali_piksel = sayimlar.get('a') or 0
+    gecerli_piksel = piksel_say(gecerliMaske)
+    anomali_piksel = piksel_say(nihai_puruzsuz.gt(esikler[1]).And(gecerliMaske))
 
     if gecerli_piksel < 15:
         raise RuntimeError(
-            f"Analiz edilebilir çıplak zemin bulunamadı. "
-            f"Toplam piksel: {toplam_piksel}, geçerli: {gecerli_piksel}. "
+            f"Analiz edilebilir çıplak zemin bulunamadı (geçerli piksel: {gecerli_piksel}). "
             f"Bu alan büyük ihtimalle su, bitki örtüsü, ekili tarım veya yapılaşma. "
             f"Maskeleri panelden kapatıp tekrar deneyebilirsin."
         )
@@ -323,28 +324,10 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
     # -----------------------------------------------------------------
     # VEKTÖRLEŞTİRME
     # -----------------------------------------------------------------
-    if anomali_piksel == 0:
-        # Bu bir hata DEĞİL. v2'nin en önemli davranışı: bölgesel referansa
-        # göre kayda değer bir şey yoksa boş döner.
-        return {'type': 'FeatureCollection', 'features': []}, {
-            'kullanilan_tarihler': kullanilan_tarihler,
-            'goruntu_sayisi': goruntu_sayisi,
-            'toplam_piksel': toplam_piksel,
-            'gecerli_piksel': gecerli_piksel,
-            'anomali_piksel': 0,
-            'hassasiyet': hassasiyet,
-            'esikler': esikler,
-            'skor_dagilimi': teshis_skor,
-            'kararlilik_dagilimi': teshis_kararlilik,
-            'bos_sonuc_aciklamasi': (
-                f"Eşik {esikler[1]} idi, alandaki en yüksek skor "
-                f"{teshis_skor.get('max')}. "
-                + ("Eşik çok yakın — hassasiyeti yükseltmeyi dene."
-                   if (teshis_skor.get('max') or 0) > esikler[1] * 0.8
-                   else "Bölgesel arka plandan ayrışan bir şey yok.")
-            ),
-        }
-
+    # Erken çıkış YOK. Önceki sürümde "anomali pikseli 0" ise vektörleştirmeye
+    # hiç geçmiyordum; sayım hatalıysa bu, aslında poligon üretecek bir alanda
+    # da boş sonuç veriyordu. Artık her zaman vektörleştirip GERÇEK poligon
+    # sayısına bakıyoruz.
     cok_bantli = siniflandirilmis \
         .addBands(nihai_puruzsuz.rename('skor')) \
         .addBands(kararlilik.rename('kararlilik'))
@@ -356,19 +339,46 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
         maxPixels=1e10, bestEffort=True, eightConnected=True, tileScale=4,
     )
 
-    # Çok küçük lekeleri ele: alan hesabı kenar yumuşatmadan sonra yapılıyor
-    # (aşağıda), çünkü buffer işlemi geometriyi değiştiriyor.
     def kenariYumusat(f):
-        g = f.geometry().simplify(5)
-        g = g.buffer(18).simplify(5).buffer(-18).simplify(5)
+        # DİKKAT: v1'deki buffer(18) -> buffer(-18) tekniğini buradan çıkardım.
+        # O teknik köşeleri güzel yuvarlatıyor AMA 36 metreden ince bir poligonu
+        # tamamen yok ediyor (negatif buffer şekli içe doğru kapatıyor).
+        # Anomali lekelerinin çoğu ince ve uzun olduğu için hepsi bu adımda
+        # buharlaşıyordu ve sonuç boş görünüyordu.
+        # Şimdi sadece basitleştirme + hafif tek yönlü yumuşatma var.
+        g = f.geometry().simplify(8)
         return f.setGeometry(g).set('alan_m2', g.area(10))
 
-    vektorler = vektorler.map(kenariYumusat).filter(ee.Filter.gte('alan_m2', 3000))
+    vektorler = vektorler.map(kenariYumusat) \
+        .filter(ee.Filter.gte('alan_m2', 800))   # ~8 piksel; altı gürültü
 
-    return vektorler.getInfo(), {
+    sonuc_geojson = vektorler.getInfo()
+    poligon_sayisi = len(sonuc_geojson.get('features') or [])
+
+    if poligon_sayisi == 0:
+        return {'type': 'FeatureCollection', 'features': []}, {
+            'kullanilan_tarihler': kullanilan_tarihler,
+            'goruntu_sayisi': goruntu_sayisi,
+            'gecerli_piksel': gecerli_piksel,
+            'anomali_piksel': anomali_piksel,
+            'hassasiyet': hassasiyet,
+            'esikler': esikler,
+            'skor_dagilimi': teshis_skor,
+            'kararlilik_dagilimi': teshis_kararlilik,
+            'bos_sonuc_aciklamasi': (
+                f"Eşik {esikler[1]}, alandaki en yüksek skor {teshis_skor.get('max')}, "
+                f"eşiği geçen piksel {anomali_piksel}. "
+                + ("Eşiği geçen piksel var ama hepsi 800 m²'nin altında dağınık "
+                   "lekeler — anlamlı büyüklükte bir hedef oluşmuyor."
+                   if anomali_piksel > 0
+                   else "Bölgesel arka plandan ayrışan bir şey yok.")
+            ),
+        }
+
+    return sonuc_geojson, {
+        'poligon_sayisi': poligon_sayisi,
         'kullanilan_tarihler': kullanilan_tarihler,
         'goruntu_sayisi': goruntu_sayisi,
-        'toplam_piksel': toplam_piksel,
         'gecerli_piksel': gecerli_piksel,
         'anomali_piksel': anomali_piksel,
         'hassasiyet': hassasiyet,
