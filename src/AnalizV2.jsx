@@ -91,7 +91,25 @@ export default function AnalizV2({ ciziliAlan }) {
         }),
       });
 
-      const gelen = await yanit.json();
+      // Vercel, fonksiyon zaman aşımına uğradığında JSON değil düz metin
+      // hata sayfası döndürüyor. Doğrudan .json() çağırmak o durumda
+      // "Unexpected token 'A'" gibi anlamsız bir hata veriyordu.
+      const metin = await yanit.text();
+      let gelen;
+      try {
+        gelen = JSON.parse(metin);
+      } catch {
+        if (yanit.status === 504 || /timeout|timed out/i.test(metin)) {
+          throw new Error(
+            'Analiz zaman aşımına uğradı. Çizdiğin alan çok büyük olabilir — ' +
+            'daha küçük bir alan deneyebilirsin.'
+          );
+        }
+        throw new Error(
+          `Sunucu beklenmeyen bir yanıt döndü (HTTP ${yanit.status}). ` +
+          'Alanı küçültüp tekrar dene.'
+        );
+      }
       if (!gelen.basarili) throw new Error(gelen.hata || 'Bilinmeyen hata');
       setSonuc(gelen);
     } catch (e) {

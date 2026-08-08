@@ -50,7 +50,11 @@ MINERAL_PROFILLERI = {
 
 ORTAK_CRS = 'EPSG:3857'
 ORTAK_OLCEK = 10          # cizilen alan icin (v1 ile ayni)
-BOLGESEL_OLCEK = 60       # bolgesel istatistik icin - kaba yeter, cok daha hizli
+BOLGESEL_OLCEK = 120      # bolgesel istatistik icin
+# NOT: 60 m ile denendi ve fonksiyon zaman asimina ugradi. Bolgesel esik
+# hesabi 25 km'lik alanda 10 goruntuyu tek tek isliyor; olcegi iki katina
+# cikarmak hesap yukunu ~4 kat azaltiyor. Arka plan DAGILIMI icin 120 m
+# fazlasiyla yeterli - sinif esigi zaten tek bir sayiya iniyor.
 BOLGESEL_TAMPON = 25000   # metre
 
 # SINIF ESIKLERI ARTIK SABIT SAYI DEGIL, BOLGESEL YUZDELIK.
@@ -72,7 +76,7 @@ BOLGESEL_TAMPON = 25000   # metre
 HASSASIYET_YUZDELIK = {
     'yuksek': [70, 84, 93, 98],    # bolgenin ust %30'u zayif sinif sayilir
     'orta':   [85, 93, 97, 99],    # varsayilan
-    'dusuk':  [93, 97, 99, 100],   # sadece bolgenin en ust dilimleri
+    'dusuk':  [93, 96, 98, 99],    # sadece bolgenin en ust dilimleri
 }
 
 _ee_hazir = False
@@ -144,7 +148,10 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
         .filterDate(baslangic_tarihi, bitis_tarihi) \
         .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 70)) \
         .sort('CLOUDY_PIXEL_PERCENTAGE') \
-        .limit(10)
+        .limit(6)
+    # NOT: v1 10 goruntu kullaniyor. v2 her goruntuyu AYRI hesapladigi ve
+    # bunu 25 km'lik bolge icin de yaptigi icin 10 goruntu zaman asimina
+    # yol aciyordu. 6 goruntu zamansal kararlilik icin yeterli ayrim veriyor.
 
     zaman_damgalari = s2.aggregate_array('system:time_start').getInfo()
     kullanilan_tarihler = sorted({
@@ -268,7 +275,9 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
     #
     # Ölçek BOLGESEL_OLCEK (60 m): bölgesel arka plan dağılımını belirlemek
     # için 10 m gereksiz ve çok pahalı.
-    bolgesel_skor = nihai_puruzsuz.updateMask(gecerliMaske).reduceRegion(
+    # Yumusatilmamis skor kullaniliyor: focal_median 25 km'lik alanda cok
+    # pahali ve arka plan DAGILIMINI neredeyse hic degistirmiyor.
+    bolgesel_skor = nihai_skor.updateMask(gecerliMaske).reduceRegion(
         reducer=ee.Reducer.percentile(yuzdelikler),
         geometry=bolge, crs=ORTAK_CRS, scale=BOLGESEL_OLCEK,
         maxPixels=1e10, bestEffort=True, tileScale=4,
