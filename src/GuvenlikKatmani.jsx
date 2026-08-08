@@ -60,6 +60,73 @@ export async function guvenlikSuresiniYaz(rolAnahtari, dakika) {
   return sayi;
 }
 
+/*
+ * ALARM SESİ
+ * ----------
+ * Harici ses dosyası kullanmıyoruz — Web Audio API ile sentezleniyor.
+ * Sebep: dosya barındırmak, yüklenme gecikmesi ve deploy'a ek yük yok;
+ * ayrıca tarayıcı önbelleğine takılıp sessiz kalma riski ortadan kalkıyor.
+ *
+ * Ses: iki tonlu siren (yükselen-alçalan), saniyede bir tekrar.
+ */
+function sirenBaslat() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+
+  let ctx;
+  try {
+    ctx = new AudioCtx();
+  } catch {
+    return null;
+  }
+
+  // Tarayıcılar kullanıcı etkileşimi olmadan sesi askıya alabilir.
+  // resume() denenip başarısız olursa sessizce geçiyoruz — alarmın
+  // görsel kısmı zaten çalışıyor.
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+  const anaSes = ctx.createGain();
+  anaSes.gain.value = 0.18;          // rahatsız etmeyecek ama fark edilir seviye
+  anaSes.connect(ctx.destination);
+
+  let durduruldu = false;
+  let zamanlayici = null;
+
+  const birBip = (frekans, baslangic, sure) => {
+    const osilator = ctx.createOscillator();
+    const kazanc = ctx.createGain();
+    osilator.type = 'square';        // keskin, alarm karakteri
+    osilator.frequency.setValueAtTime(frekans, baslangic);
+
+    // Ani başlangıç/bitiş "tık" sesi yapar; kısa rampa ile yumuşatıyoruz
+    kazanc.gain.setValueAtTime(0, baslangic);
+    kazanc.gain.linearRampToValueAtTime(1, baslangic + 0.02);
+    kazanc.gain.setValueAtTime(1, baslangic + sure - 0.03);
+    kazanc.gain.linearRampToValueAtTime(0, baslangic + sure);
+
+    osilator.connect(kazanc);
+    kazanc.connect(anaSes);
+    osilator.start(baslangic);
+    osilator.stop(baslangic + sure);
+  };
+
+  const dongu = () => {
+    if (durduruldu) return;
+    const simdi = ctx.currentTime;
+    birBip(880, simdi, 0.28);           // yüksek ton
+    birBip(620, simdi + 0.30, 0.28);    // alçak ton
+    zamanlayici = setTimeout(dongu, 720);
+  };
+
+  dongu();
+
+  return () => {
+    durduruldu = true;
+    if (zamanlayici) clearTimeout(zamanlayici);
+    try { ctx.close(); } catch { /* zaten kapalı */ }
+  };
+}
+
 export function guvenlikAlarmiTestEt() {
   window.dispatchEvent(new CustomEvent(OLAY_TEST));
 }
@@ -102,6 +169,10 @@ export default function GuvenlikKatmani({ rol = 'kullanici' }) {
   // erken alarm çalmasın.
   const [dakika, setDakika] = useState(null);
   const [alarm, setAlarm] = useState(false);
+  // Ses tercihi cihaz bazlı: kullanıcı sessize almak isteyebilir.
+  const [sesAcik, setSesAcik] = useState(
+    () => localStorage.getItem('moremine_alarm_sesi') !== 'kapali',
+  );
   const [kalan, setKalan] = useState(GERI_SAYIM_SANIYE);
   const sayacRef = useRef(null);
 
@@ -138,6 +209,8 @@ export default function GuvenlikKatmani({ rol = 'kullanici' }) {
   useEffect(() => {
     if (!alarm) return;
 
+    const sesiDurdur = sesAcik ? sirenBaslat() : null;
+
     setKalan(GERI_SAYIM_SANIYE);
     sayacRef.current = setInterval(() => {
       setKalan((onceki) => {
@@ -150,8 +223,11 @@ export default function GuvenlikKatmani({ rol = 'kullanici' }) {
       });
     }, 1000);
 
-    return () => clearInterval(sayacRef.current);
-  }, [alarm]);
+    return () => {
+      clearInterval(sayacRef.current);
+      if (sesiDurdur) sesiDurdur();
+    };
+  }, [alarm, sesAcik]);
 
   return (
     <>
@@ -233,8 +309,24 @@ export default function GuvenlikKatmani({ rol = 'kullanici' }) {
               {kalan}
             </div>
 
+            <button
+              onClick={() => {
+                const yeni = !sesAcik;
+                setSesAcik(yeni);
+                localStorage.setItem('moremine_alarm_sesi', yeni ? 'acik' : 'kapali');
+              }}
+              style={{
+                marginTop: 20, padding: '7px 16px', borderRadius: 20,
+                border: '1px solid rgba(255,255,255,0.35)',
+                background: 'rgba(0,0,0,0.3)', color: '#fff',
+                cursor: 'pointer', fontSize: 12,
+              }}
+            >
+              {sesAcik ? '🔊 Sesi kapat' : '🔇 Sesi aç'}
+            </button>
+
             <div style={{
-              marginTop: 20, color: 'rgba(255,255,255,0.6)',
+              marginTop: 16, color: 'rgba(255,255,255,0.6)',
               fontSize: 11, fontFamily: 'monospace',
             }}>
               MoreMine · Güvenlik Protokolü
