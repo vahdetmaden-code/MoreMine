@@ -8,6 +8,9 @@
     },
     "api/analyze_manyetik.py": {
       "maxDuration": 30
+    },
+    "api/analyze_v2.py": {
+      "maxDuration": 90
     }
   }
 }
