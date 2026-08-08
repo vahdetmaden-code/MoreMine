@@ -123,7 +123,7 @@ def kullanici_bilgisini_al(kullanici_token):
 # ---------------------------------------------------------------------
 
 def analiz_v2(koordinatlar, hedef_mineral='altin',
-              tarim_maskesi=True, yerlesim_maskesi=True,
+              tarim_maskesi=False, yerlesim_maskesi=True,
               hassasiyet='orta',
               ozel_baslangic=None, ozel_bitis=None):
     gee_baslat()
@@ -355,6 +355,12 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
         ).getInfo()
         return sonuc.get('n') or 0
 
+    # Maskelerden ONCEKI kullanilabilir zemin (su+bitki disi) ve SONRAKI.
+    # Bu ikisinin orani, arazi ortusu maskesinin ne kadar alan sildigini
+    # gosterir. Onceki surumde bu gorunmedigi icin "maske alanin %99'unu
+    # sildi" durumu farkedilmiyordu ve v2 sanki farkli yerler buluyormus
+    # gibi gorunuyordu - halbuki bakabildigi yer bir sliverdi.
+    ham_zemin = piksel_say(suMaskesi.Or(bitkiMaskesi).Not())
     gecerli_piksel = piksel_say(gecerliMaske)
     anomali_piksel = piksel_say(nihai_puruzsuz.gt(esikler[1]).And(gecerliMaske))
 
@@ -403,7 +409,9 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
         return {'type': 'FeatureCollection', 'features': []}, {
             'kullanilan_tarihler': kullanilan_tarihler,
             'goruntu_sayisi': goruntu_sayisi,
-            'gecerli_piksel': gecerli_piksel,
+            'ham_zemin': ham_zemin,
+            'ham_zemin': ham_zemin,
+        'gecerli_piksel': gecerli_piksel,
             'anomali_piksel': anomali_piksel,
             'hassasiyet': hassasiyet,
             'yuzdelikler': yuzdelikler,
@@ -424,6 +432,7 @@ def analiz_v2(koordinatlar, hedef_mineral='altin',
         'poligon_sayisi': poligon_sayisi,
         'kullanilan_tarihler': kullanilan_tarihler,
         'goruntu_sayisi': goruntu_sayisi,
+        'ham_zemin': ham_zemin,
         'gecerli_piksel': gecerli_piksel,
         'anomali_piksel': anomali_piksel,
         'hassasiyet': hassasiyet,
@@ -452,7 +461,7 @@ class handler(BaseHTTPRequestHandler):
 
             koordinatlar = veri['koordinatlar']
             hedef_mineral = veri.get('hedef_mineral', 'altin')
-            tarim_maskesi = veri.get('tarim_maskesi', True)
+            tarim_maskesi = veri.get('tarim_maskesi', False)
             yerlesim_maskesi = veri.get('yerlesim_maskesi', True)
             hassasiyet = veri.get('hassasiyet', 'orta')
 

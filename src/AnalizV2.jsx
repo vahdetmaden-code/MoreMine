@@ -55,7 +55,9 @@ function v2Bilgi(feature, layer) {
 export default function AnalizV2({ ciziliAlan }) {
   const [acik, setAcik] = useState(false);
   const [mineral, setMineral] = useState('altin');
-  const [tarimMaskesi, setTarimMaskesi] = useState(true);
+  // Varsayılan KAPALI: Türkiye'nin maden potansiyeli olan arazisinin büyük
+  // kısmı tarla. Maskeyi açık tutmak arama alanını yok ediyor.
+  const [tarimMaskesi, setTarimMaskesi] = useState(false);
   const [yerlesimMaskesi, setYerlesimMaskesi] = useState(true);
   const [hassasiyet, setHassasiyet] = useState('orta');
   const [gorunur, setGorunur] = useState(true);
@@ -241,6 +243,18 @@ export default function AnalizV2({ ciziliAlan }) {
                     fontSize: 11, lineHeight: 1.7,
                   }}>
                     <b style={{ color: '#cbd5e1' }}>Teşhis</b>
+                    {sonuc.ham_zemin > 0 && sonuc.gecerli_piksel / sonuc.ham_zemin < 0.25 && (
+                      <div style={{
+                        background: '#78350f', padding: 7, borderRadius: 5,
+                        margin: '5px 0', lineHeight: 1.5,
+                      }}>
+                        <b>Maskeler alanın %{Math.round(100 - 100 * sonuc.gecerli_piksel / sonuc.ham_zemin)}'ini sildi.</b><br />
+                        Çıplak zemin {sonuc.ham_zemin.toLocaleString('tr-TR')} pikseldi,
+                        analiz {sonuc.gecerli_piksel.toLocaleString('tr-TR')} piksele düştü.
+                        Sonuçlar bu küçük kalıntıya ait — v1 ile karşılaştırmak
+                        anlamlı olmaz. Maskeleri kapatıp tekrar dene.
+                      </div>
+                    )}
                     <div style={{ color: '#64748b', marginBottom: 3 }}>
                       Eşikler çevredeki 25 km'lik bölgenin
                       %{sonuc.yuzdelikler?.[0]} diliminden alındı
@@ -295,7 +309,15 @@ export default function AnalizV2({ ciziliAlan }) {
                       <span>Anomali pikseli</span><b>{(sonuc.anomali_piksel || 0).toLocaleString('tr-TR')}</b>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Analiz edilen zemin</span><b>{(sonuc.gecerli_piksel || 0).toLocaleString('tr-TR')}</b>
+                      <span>Analiz edilen zemin</span>
+                      <b>
+                        {(sonuc.gecerli_piksel || 0).toLocaleString('tr-TR')}
+                        {sonuc.ham_zemin > 0 && (
+                          <span style={{ color: '#94a3b8', fontWeight: 400 }}>
+                            {' '}/ {sonuc.ham_zemin.toLocaleString('tr-TR')}
+                          </span>
+                        )}
+                      </b>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>Kullanılan görüntü</span><b>{sonuc.goruntu_sayisi}</b>
