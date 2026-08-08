@@ -239,6 +239,8 @@ function AnaUygulama({ oturum, rol }) {
   const [ciziliAlan, setCiziliAlan] = useState(null);
   const [sonuc, setSonuc] = useState(null);
   const [katmanFiltre, setKatmanFiltre] = useState(VARSAYILAN_FILTRE);
+  const [aktifTaramaId, setAktifTaramaId] = useState(null);
+  const [v2Sonuc, setV2Sonuc] = useState(null);
   const [sonucGorunur, setSonucGorunur] = useState(true);
   const [odaklanilacakAlan, setOdaklanilacakAlan] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
@@ -451,6 +453,8 @@ function AnaUygulama({ oturum, rol }) {
         .single();
 
       if (eklemeHatasi) throw eklemeHatasi;
+      setAktifTaramaId(kayit.id);
+      setV2Sonuc(null);
 
       // Uydunun konuma "yaklaştığı" animasyonu bir süre göster, sonra tarama evresine geç
       await beklet(1800);
@@ -509,9 +513,12 @@ function AnaUygulama({ oturum, rol }) {
   const gecmisTaramayiAc = async (id) => {
     setHata(null);
     setSonuc(null);
+    setV2Sonuc(null);
+    setAktifTaramaId(id);
     const { data, error } = await supabase
       .from('taramalar')
       .select('sonuc, durum, hata_mesaji, koordinatlar')
+      .select('sonuc, sonuc_v2, durum, hata_mesaji, koordinatlar')
       .eq('id', id)
       .single();
 
@@ -521,6 +528,9 @@ function AnaUygulama({ oturum, rol }) {
     }
     if (data.koordinatlar) {
       setOdaklanilacakAlan(data.koordinatlar);
+    }
+    if (data.sonuc_v2) {
+      setV2Sonuc(data.sonuc_v2);
     }
     if (data.durum === 'Hata') {
       setHata('Bu tarama hatayla sonuçlanmıştı: ' + (data.hata_mesaji || 'Detay yok.'));
@@ -846,7 +856,7 @@ function AnaUygulama({ oturum, rol }) {
             <CizimAraci onAlanCizildi={alanCizildi} />
             {sonuc && sonucGorunur && katmanFiltre.v1 && <GeoJSON key={JSON.stringify(sonuc).length + '-' + katmanFiltre.siniflar.join('')} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} filter={(f) => katmanFiltre.siniflar.includes(Number(f.properties.sinif))} />}
             <ManyetikKatman ciziliAlan={ciziliAlan} optikSonuc={sonuc} taramaId={null} />
-            <AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} filtre={katmanFiltre} />
+           <AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} filtre={katmanFiltre} taramaId={aktifTaramaId} disSonuc={v2Sonuc} />
             <KatmanKontrol deger={katmanFiltre} onChange={setKatmanFiltre} />
             <GuvenlikKatmani rol={rol} />
           </MapContainer>

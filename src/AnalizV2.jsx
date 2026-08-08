@@ -71,9 +71,10 @@ function v2Bilgi(feature, layer) {
 
 export default function AnalizV2({
   ciziliAlan,
-  konumAdi = null,
   onKaydedildi = null,
   filtre = null,          // { v2: bool, siniflar: number[] } — KatmanKontrol'den gelir
+  taramaId = null,        // v2 sonucu BU taramanın içine yazılır, ayrı kayıt açılmaz
+  disSonuc = null,        // geçmişten yüklenen v2 GeoJSON'u
 }) {
   const [acik, setAcik] = useState(false);
   const [mineral, setMineral] = useState('altin');
@@ -139,28 +140,36 @@ export default function AnalizV2({
       if (!gelen.basarili) throw new Error(gelen.hata || 'Bilinmeyen hata');
       setSonuc(gelen);
 
-      // Sonucu geçmişe yaz. Kayıt başarısız olursa analiz sonucu ekranda
-      // kalmaya devam etsin — kaydedememek analizi geçersiz kılmaz.
-      try {
-        const poligonAdedi = gelen.sonuc?.features?.length ?? 0;
-        const { error: kayitHatasi } = await supabase.from('taramalar').insert({
-          kullanici_id: session.user.id,
-          koordinatlar: ciziliAlan,
-          konum_adi: konumAdi,
-          hedef_mineral: mineral,
-          durum: poligonAdedi > 0 ? 'Tamamlandı' : 'Anomali Yok',
-          sonuc: gelen.sonuc,
-          motor: 'v2',
-        });
-        if (kayitHatasi) {
-          setKayitNotu('Analiz tamam, ancak geçmişe kaydedilemedi: ' + kayitHatasi.message);
-        } else {
-          setKayitNotu('Geçmişe kaydedildi.');
-          if (onKaydedildi) onKaydedildi();
-          setTimeout(() => setKayitNotu(null), 4000);
+      /*
+       * KAYIT — ayrı bir tarama satırı AÇMIYORUZ.
+       *
+       * Önceki sürümde v2, taramalar tablosuna kendi satırını ekliyordu.
+       * Sonuç: aynı alan geçmişte iki kez görünüyordu ve o kaydı açınca
+       * App onu v1 sonucu sanıp v1 katmanına yüklüyordu — "v1'i işaretleyince
+       * v2 verisi geliyor" sorununun sebebi buydu.
+       *
+       * Doğrusu: tek tarama, iki sonuç. v2 çıktısı mevcut taramanın
+       * sonuc_v2 sütununa yazılıyor.
+       */
+      if (!taramaId) {
+        setKayitNotu('Sonuç ekranda, ancak kaydedilmedi: önce normal (v1) taramayı çalıştır.');
+      } else {
+        try {
+          const { error: kayitHatasi } = await supabase
+            .from('taramalar')
+            .update({ sonuc_v2: gelen.sonuc })
+            .eq('id', taramaId);
+
+          if (kayitHatasi) {
+            setKayitNotu('Analiz tamam, ancak kaydedilemedi: ' + kayitHatasi.message);
+          } else {
+            setKayitNotu('Bu taramaya kaydedildi.');
+            if (onKaydedildi) onKaydedildi();
+            setTimeout(() => setKayitNotu(null), 4000);
+          }
+        } catch (kayitIstisna) {
+          setKayitNotu('Analiz tamam, kayıt sırasında hata: ' + kayitIstisna.message);
         }
-      } catch (kayitIstisna) {
-        setKayitNotu('Analiz tamam, kayıt sırasında hata: ' + kayitIstisna.message);
       }
     } catch (e) {
       setHata(e.message);
@@ -168,7 +177,7 @@ export default function AnalizV2({
     } finally {
       setYukleniyor(false);
     }
-  }, [ciziliAlan, alanHazir, mineral, yerlesimMaskesi, hassasiyet, konumAdi, onKaydedildi]);
+  }, [ciziliAlan, alanHazir, mineral, yerlesimMaskesi, hassasiyet, taramaId, onKaydedildi]);
 
   /*
    * Leaflet'e verilmeden önce geometriyi TEMİZLE.
@@ -180,7 +189,8 @@ export default function AnalizV2({
    * haritaya hiç göndermiyoruz.
    */
   const temizSonuc = (() => {
-    const ham = sonuc?.sonuc;
+    // Yerel analiz sonucu varsa onu, yoksa geçmişten yüklenen v2 verisini göster.
+    const ham = sonuc?.sonuc || disSonuc;
     if (!ham || !Array.isArray(ham.features)) return null;
 
     const gecerli = ham.features.filter((o) => {
@@ -335,7 +345,7 @@ export default function AnalizV2({
               </div>
             )}
 
-            {sonuc && (
+            {(sonuc || disSonuc) && (
               <>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', marginBottom: 8 }}>
                   <input type="checkbox" checked={gorunur} onChange={(e) => setGorunur(e.target.checked)} />
