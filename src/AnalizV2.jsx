@@ -24,8 +24,24 @@ const HASSASIYETLER = [
   { deger: 'dusuk', etiket: 'Düşük', aciklama: 'Bölgenin üst %7\'si — en güçlüler' },
 ];
 
-const SINIF_RENK = { 1: '#22c55e', 2: '#eab308', 3: '#f97316', 4: '#dc2626' };
-const SINIF_AD = { 1: 'Zayıf', 2: 'Orta', 3: 'Güçlü', 4: 'Çok güçlü' };
+const SINIF_RENK = { 1: '#22c55e', 2: '#facc15', 3: '#f97316', 4: '#ef4444' };
+
+// Sınıf adları ve her sınıf için önerilen saha adımı.
+// v1'deki RENKLER/ETIKETLER ile birebir aynı renk kodları kullanılıyor ki
+// iki motorun çıktısı görsel olarak karşılaştırılabilsin.
+const SINIF_AD = {
+  1: 'Zayıf etki',
+  2: 'Orta etki',
+  3: 'Güçlü etki',
+  4: 'Çok güçlü etki',
+};
+
+const SINIF_ONERI = {
+  1: 'Kayda değer değil, geçilebilir.',
+  2: 'Not al, çevresiyle birlikte değerlendir.',
+  3: 'Saha ziyareti planla, yüzey örneği al.',
+  4: 'Öncelikli saha kontrolü — altın tanıyan dedektörle incele.',
+};
 
 function v2Stil(feature) {
   const sinif = feature.properties.sinif || 1;
@@ -43,6 +59,7 @@ function v2Bilgi(feature, layer) {
   const kararlilikYuzde = Math.round((p.kararlilik || 0) * 100);
   layer.bindTooltip(
     `<b>v2 — ${SINIF_AD[p.sinif] || p.sinif}</b><br/>` +
+    `<span style="color:#7c2d12">${SINIF_ONERI[p.sinif] || ''}</span><br/>` +
     `Skor: ${(p.skor || 0).toFixed(3)}<br/>` +
     `Zamansal kararlılık: %${kararlilikYuzde}<br/>` +
     `Alan: ${Math.round(p.alan_m2 || 0).toLocaleString('tr-TR')} m²<br/>` +
@@ -55,9 +72,6 @@ function v2Bilgi(feature, layer) {
 export default function AnalizV2({ ciziliAlan }) {
   const [acik, setAcik] = useState(false);
   const [mineral, setMineral] = useState('altin');
-  // Varsayılan KAPALI: Türkiye'nin maden potansiyeli olan arazisinin büyük
-  // kısmı tarla. Maskeyi açık tutmak arama alanını yok ediyor.
-  const [tarimMaskesi, setTarimMaskesi] = useState(false);
   const [yerlesimMaskesi, setYerlesimMaskesi] = useState(true);
   const [hassasiyet, setHassasiyet] = useState('orta');
   const [gorunur, setGorunur] = useState(true);
@@ -87,7 +101,7 @@ export default function AnalizV2({ ciziliAlan }) {
         body: JSON.stringify({
           koordinatlar: ciziliAlan,
           hedef_mineral: mineral,
-          tarim_maskesi: tarimMaskesi,
+          tarim_maskesi: false,
           yerlesim_maskesi: yerlesimMaskesi,
           hassasiyet: hassasiyet,
         }),
@@ -120,7 +134,7 @@ export default function AnalizV2({ ciziliAlan }) {
     } finally {
       setYukleniyor(false);
     }
-  }, [ciziliAlan, alanHazir, mineral, tarimMaskesi, yerlesimMaskesi, hassasiyet]);
+  }, [ciziliAlan, alanHazir, mineral, yerlesimMaskesi, hassasiyet]);
 
   const poligonSayisi = sonuc?.sonuc?.features?.length ?? 0;
 
@@ -128,7 +142,7 @@ export default function AnalizV2({ ciziliAlan }) {
     <>
       {sonuc && gorunur && poligonSayisi > 0 && (
         <GeoJSON
-          key={`v2-${mineral}-${hassasiyet}-${poligonSayisi}-${tarimMaskesi}-${yerlesimMaskesi}`}
+          key={`v2-${mineral}-${hassasiyet}-${poligonSayisi}-${yerlesimMaskesi}`}
           data={sonuc.sonuc}
           style={v2Stil}
           onEachFeature={v2Bilgi}
@@ -195,10 +209,6 @@ export default function AnalizV2({ ciziliAlan }) {
             </div>
 
             <div style={{ marginBottom: 10 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5, cursor: 'pointer' }}>
-                <input type="checkbox" checked={tarimMaskesi} onChange={(e) => setTarimMaskesi(e.target.checked)} />
-                <span>Ekili tarım alanını ele</span>
-              </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
                 <input type="checkbox" checked={yerlesimMaskesi} onChange={(e) => setYerlesimMaskesi(e.target.checked)} />
                 <span>Yapılaşmayı ele</span>
@@ -236,6 +246,32 @@ export default function AnalizV2({ ciziliAlan }) {
                   <input type="checkbox" checked={gorunur} onChange={(e) => setGorunur(e.target.checked)} />
                   <span>v2 sonucunu göster</span>
                 </label>
+
+                <div style={{
+                  borderTop: '1px solid #334155', paddingTop: 8,
+                  marginBottom: 8, fontSize: 11, lineHeight: 1.6,
+                }}>
+                  <b style={{ color: '#cbd5e1' }}>Renk anlamları</b>
+                  {[4, 3, 2, 1].map((sinif) => (
+                    <div key={sinif} style={{ display: 'flex', gap: 7, alignItems: 'flex-start', marginTop: 4 }}>
+                      <span style={{
+                        display: 'inline-block', width: 12, height: 12, flexShrink: 0,
+                        borderRadius: 3, marginTop: 2, background: SINIF_RENK[sinif],
+                      }} />
+                      <span>
+                        <b style={{ color: sinif === 4 ? '#fca5a5' : '#e2e8f0' }}>{SINIF_AD[sinif]}</b>
+                        <span style={{ color: '#94a3b8' }}> — {SINIF_ONERI[sinif]}</span>
+                      </span>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 7, alignItems: 'center', marginTop: 4, color: '#94a3b8' }}>
+                    <span style={{
+                      display: 'inline-block', width: 12, height: 12, flexShrink: 0,
+                      borderRadius: 3, background: '#1e3a8a',
+                    }} />
+                    <span>Anomali yok (yalnız v1 çizer)</span>
+                  </div>
+                </div>
 
                 {sonuc.skor_dagilimi && (
                   <div style={{
@@ -324,6 +360,36 @@ export default function AnalizV2({ ciziliAlan }) {
                     </div>
                   </div>
                 )}
+
+                <div style={{
+                  borderTop: '1px solid #334155', paddingTop: 8, marginBottom: 8,
+                  fontSize: 11, lineHeight: 1.6,
+                }}>
+                  <b style={{ color: '#cbd5e1' }}>Renk anlamları</b>
+                  {[4, 3, 2, 1].map((sinif) => (
+                    <div key={sinif} style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 4,
+                    }}>
+                      <span style={{
+                        display: 'inline-block', width: 11, height: 11, borderRadius: 2,
+                        background: SINIF_RENK[sinif], flexShrink: 0, marginTop: 2,
+                      }} />
+                      <span>
+                        <b style={{ color: sinif === 4 ? '#fca5a5' : '#e2e8f0' }}>
+                          {SINIF_AD[sinif]}
+                        </b>
+                        <span style={{ color: '#94a3b8' }}> — {SINIF_TAVSIYE[sinif]}</span>
+                      </span>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                    <span style={{
+                      display: 'inline-block', width: 11, height: 11, borderRadius: 2,
+                      background: '#1e3a8a', flexShrink: 0,
+                    }} />
+                    <span style={{ color: '#94a3b8' }}>Anomali Yok</span>
+                  </div>
+                </div>
 
                 <div style={{
                   fontSize: 10.5, color: '#94a3b8', lineHeight: 1.6,
