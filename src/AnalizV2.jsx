@@ -69,7 +69,7 @@ function v2Bilgi(feature, layer) {
   );
 }
 
-export default function AnalizV2({ ciziliAlan }) {
+export default function AnalizV2({ ciziliAlan, konumAdi = null, onKaydedildi = null }) {
   const [acik, setAcik] = useState(false);
   const [mineral, setMineral] = useState('altin');
   const [yerlesimMaskesi, setYerlesimMaskesi] = useState(true);
@@ -78,6 +78,7 @@ export default function AnalizV2({ ciziliAlan }) {
   const [sonuc, setSonuc] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [hata, setHata] = useState(null);
+  const [kayitNotu, setKayitNotu] = useState(null);
 
   const alanHazir = Array.isArray(ciziliAlan) && ciziliAlan.length >= 3;
 
@@ -88,6 +89,7 @@ export default function AnalizV2({ ciziliAlan }) {
     }
     setYukleniyor(true);
     setHata(null);
+    setKayitNotu(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Oturum bulunamadı, tekrar giriş yap.');
@@ -110,6 +112,9 @@ export default function AnalizV2({ ciziliAlan }) {
       // Vercel, fonksiyon zaman aşımına uğradığında JSON değil düz metin
       // hata sayfası döndürüyor. Doğrudan .json() çağırmak o durumda
       // "Unexpected token 'A'" gibi anlamsız bir hata veriyordu.
+      // --- Taramayı geçmişe kaydet ---
+      // v1'le aynı tabloya (taramalar) yazıyoruz ki tek bir geçmiş listesi olsun.
+      // Ayırt etmek için "motor" sütunu kullanılıyor ('v1' / 'v2').
       const metin = await yanit.text();
       let gelen;
       try {
@@ -128,13 +133,37 @@ export default function AnalizV2({ ciziliAlan }) {
       }
       if (!gelen.basarili) throw new Error(gelen.hata || 'Bilinmeyen hata');
       setSonuc(gelen);
+
+      // Sonucu geçmişe yaz. Kayıt başarısız olursa analiz sonucu ekranda
+      // kalmaya devam etsin — kaydedememek analizi geçersiz kılmaz.
+      try {
+        const poligonAdedi = gelen.sonuc?.features?.length ?? 0;
+        const { error: kayitHatasi } = await supabase.from('taramalar').insert({
+          kullanici_id: session.user.id,
+          koordinatlar: ciziliAlan,
+          konum_adi: konumAdi,
+          hedef_mineral: mineral,
+          durum: poligonAdedi > 0 ? 'Tamamlandı' : 'Anomali Yok',
+          sonuc: gelen.sonuc,
+          motor: 'v2',
+        });
+        if (kayitHatasi) {
+          setKayitNotu('Analiz tamam, ancak geçmişe kaydedilemedi: ' + kayitHatasi.message);
+        } else {
+          setKayitNotu('Geçmişe kaydedildi.');
+          if (onKaydedildi) onKaydedildi();
+          setTimeout(() => setKayitNotu(null), 4000);
+        }
+      } catch (kayitIstisna) {
+        setKayitNotu('Analiz tamam, kayıt sırasında hata: ' + kayitIstisna.message);
+      }
     } catch (e) {
       setHata(e.message);
       setSonuc(null);
     } finally {
       setYukleniyor(false);
     }
-  }, [ciziliAlan, alanHazir, mineral, yerlesimMaskesi, hassasiyet]);
+  }, [ciziliAlan, alanHazir, mineral, yerlesimMaskesi, hassasiyet, konumAdi, onKaydedildi]);
 
   const poligonSayisi = sonuc?.sonuc?.features?.length ?? 0;
 
@@ -237,6 +266,16 @@ export default function AnalizV2({ ciziliAlan }) {
             {hata && (
               <div style={{ background: '#7f1d1d', padding: 8, borderRadius: 6, marginBottom: 10, fontSize: 11.5, lineHeight: 1.5 }}>
                 {hata}
+              </div>
+            )}
+
+            {kayitNotu && (
+              <div style={{
+                background: kayitNotu.startsWith('Geçmişe') ? '#14532d' : '#78350f',
+                padding: 8, borderRadius: 6, marginBottom: 10,
+                fontSize: 11.5, lineHeight: 1.5,
+              }}>
+                {kayitNotu}
               </div>
             )}
 
@@ -360,36 +399,6 @@ export default function AnalizV2({ ciziliAlan }) {
                     </div>
                   </div>
                 )}
-
-                <div style={{
-                  borderTop: '1px solid #334155', paddingTop: 8, marginBottom: 8,
-                  fontSize: 11, lineHeight: 1.6,
-                }}>
-                  <b style={{ color: '#cbd5e1' }}>Renk anlamları</b>
-                  {[4, 3, 2, 1].map((sinif) => (
-                    <div key={sinif} style={{
-                      display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 4,
-                    }}>
-                      <span style={{
-                        display: 'inline-block', width: 11, height: 11, borderRadius: 2,
-                        background: SINIF_RENK[sinif], flexShrink: 0, marginTop: 2,
-                      }} />
-                      <span>
-                        <b style={{ color: sinif === 4 ? '#fca5a5' : '#e2e8f0' }}>
-                          {SINIF_AD[sinif]}
-                        </b>
-                        <span style={{ color: '#94a3b8' }}> — {SINIF_TAVSIYE[sinif]}</span>
-                      </span>
-                    </div>
-                  ))}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                    <span style={{
-                      display: 'inline-block', width: 11, height: 11, borderRadius: 2,
-                      background: '#1e3a8a', flexShrink: 0,
-                    }} />
-                    <span style={{ color: '#94a3b8' }}>Anomali Yok</span>
-                  </div>
-                </div>
 
                 <div style={{
                   fontSize: 10.5, color: '#94a3b8', lineHeight: 1.6,
