@@ -47,19 +47,38 @@ export default function KatmanKontrol({ deger, onChange }) {
 
   return (
     <div style={{
-      position: 'absolute', right: 12, top: 12, zIndex: 1000,
+      /*
+       * KONUM: sağ ÜST değil, sağ ALT.
+       *
+       * iPad'de sağ üstteki buton görünmüyordu; alt sağdaki paneller
+       * (Manyetik Katman, Gelişmiş Analiz) sorunsuz görünüyor. Bu yüzden
+       * üçünü aynı köşede istifliyoruz:
+       *   bottom  12 → Manyetik Katman
+       *   bottom  70 → Gelişmiş Analiz (v2)
+       *   bottom 128 → Katmanlar (bu bileşen)
+       *
+       * Panel açıldığında alta yaslanıp yukarı doğru büyür; ekrana
+       * sığmazsa kendi içinde kayar (küçük ekranlarda taşmayı önler).
+       */
+      position: 'absolute',
+      right: 12,
+      bottom: acik ? 12 : 128,
+      zIndex: 1000,
       background: 'rgba(15,23,42,0.94)', color: '#e2e8f0',
       borderRadius: 12, padding: acik ? 14 : 0,
       width: acik ? 236 : 'auto', fontSize: 13,
+      maxHeight: 'calc(100vh - 160px)',
+      overflowY: acik ? 'auto' : 'visible',
       boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+      WebkitOverflowScrolling: 'touch',
     }}>
       {!acik ? (
         <button
           onClick={() => setAcik(true)}
           style={{
             background: '#334155', color: '#e2e8f0', border: 'none',
-            borderRadius: 12, padding: '10px 16px', cursor: 'pointer',
-            fontSize: 13, fontWeight: 600,
+            borderRadius: 12, padding: '11px 17px', cursor: 'pointer',
+            fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
           }}
         >
           🎚️ Katmanlar
@@ -76,12 +95,12 @@ export default function KatmanKontrol({ deger, onChange }) {
 
           {/* --- MOTOR SEÇİMİ --- */}
           <div style={{ marginBottom: 10 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6, cursor: 'pointer' }}>
-              <input type="checkbox" checked={filtre.v1 !== false} onChange={() => motorDegistir('v1')} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, cursor: 'pointer' }}>
+              <input type="checkbox" checked={filtre.v1 !== false} onChange={() => motorDegistir('v1')} style={{ width: 17, height: 17, flexShrink: 0 }} />
               <span>v1 <span style={{ color: '#64748b', fontSize: 11 }}>(düz çizgi)</span></span>
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
-              <input type="checkbox" checked={filtre.v2 !== false} onChange={() => motorDegistir('v2')} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input type="checkbox" checked={filtre.v2 !== false} onChange={() => motorDegistir('v2')} style={{ width: 17, height: 17, flexShrink: 0 }} />
               <span>v2 <span style={{ color: '#64748b', fontSize: 11 }}>(kesikli çizgi)</span></span>
             </label>
           </div>
@@ -94,12 +113,13 @@ export default function KatmanKontrol({ deger, onChange }) {
             {SINIFLAR.map((s) => (
               <label
                 key={s.deger}
-                style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5, cursor: 'pointer' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, cursor: 'pointer' }}
               >
                 <input
                   type="checkbox"
                   checked={(filtre.siniflar || []).includes(s.deger)}
                   onChange={() => sinifDegistir(s.deger)}
+                  style={{ width: 17, height: 17, flexShrink: 0 }}
                 />
                 <span style={{
                   display: 'inline-block', width: 12, height: 12,
