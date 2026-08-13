@@ -1,7 +1,7 @@
 {
   "functions": {
     "api/analyze.py": {
-      "maxDuration": 300
+      "maxDuration": 60
     },
     "api/admin_kullanici_ekle.py": {
       "maxDuration": 20
@@ -10,7 +10,10 @@
       "maxDuration": 30
     },
     "api/analyze_v2.py": {
-      "maxDuration": 90
+      "maxDuration": 300
+    },
+    "api/tarihce.py": {
+      "maxDuration": 60
     }
   }
 }

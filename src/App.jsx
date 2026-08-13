@@ -10,6 +10,8 @@ import ManyetikKatman from './ManyetikKatman';
 import AnalizV2 from './AnalizV2';
 import GuvenlikKatmani from './GuvenlikKatmani';
 import KatmanKontrol, { VARSAYILAN_FILTRE } from './KatmanKontrol';
+import AramaIsareti from './AramaIsareti';
+import TarihceKatmani from './TarihceKatmani';
 
 // Sınıf değerine göre renk (motor.py / api/analyze.py ile birebir aynı olmalı)
 const RENKLER = {
@@ -241,6 +243,8 @@ function AnaUygulama({ oturum, rol }) {
   const [katmanFiltre, setKatmanFiltre] = useState(VARSAYILAN_FILTRE);
   const [aktifTaramaId, setAktifTaramaId] = useState(null);
   const [v2Sonuc, setV2Sonuc] = useState(null);
+  const [tarihce, setTarihce] = useState(null);
+  const [aktifKonumAdi, setAktifKonumAdi] = useState(null);
   const [sonucGorunur, setSonucGorunur] = useState(true);
   const [odaklanilacakAlan, setOdaklanilacakAlan] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
@@ -262,6 +266,7 @@ function AnaUygulama({ oturum, rol }) {
   };
   const [sonKullanilanTarihler, setSonKullanilanTarihler] = useState(null);
   const [aramaMetni, setAramaMetni] = useState('');
+  const [aramaIsareti, setAramaIsareti] = useState(null);
   const [aramaSonuclari, setAramaSonuclari] = useState([]);
   const [aramaYukleniyor, setAramaYukleniyor] = useState(false);
   const [ucusHedefi, setUcusHedefi] = useState(null);
@@ -304,6 +309,26 @@ function AnaUygulama({ oturum, rol }) {
   const konumAra = async (e) => {
     e.preventDefault();
     if (!aramaMetni.trim()) return;
+
+    /*
+     * Önce KOORDİNAT mı diye bak. Nominatim "39.4221, 38.5288" gibi bir
+     * girdiyi genelde bulamıyor; oysa kullanıcının en çok yaptığı şey
+     * koordinat yapıştırmak. Desteklenen biçimler:
+     *   39.4221, 38.5288      39.4221 38.5288      39.4221;38.5288
+     */
+    const koordinatKalibi = /^\s*(-?\d{1,3}(?:[.,]\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:[.,]\d+)?)\s*$/;
+    const eslesme = aramaMetni.trim().match(koordinatKalibi);
+    if (eslesme) {
+      const enlem = parseFloat(eslesme[1].replace(',', '.'));
+      const boylam = parseFloat(eslesme[2].replace(',', '.'));
+      if (Math.abs(enlem) <= 90 && Math.abs(boylam) <= 180) {
+        setUcusHedefi({ lat: enlem, lng: boylam, zoom: 16 });
+        setAramaIsareti({ lat: enlem, lng: boylam, ad: 'Girilen koordinat' });
+        setAramaSonuclari([]);
+        return;
+      }
+    }
+
     setAramaYukleniyor(true);
     setAramaSonuclari([]);
     try {
@@ -320,7 +345,16 @@ function AnaUygulama({ oturum, rol }) {
   };
 
   const aramaSonucunaGit = (sonuc) => {
-    setUcusHedefi({ lat: parseFloat(sonuc.lat), lng: parseFloat(sonuc.lon), zoom: 16 });
+    const enlem = parseFloat(sonuc.lat);
+    const boylam = parseFloat(sonuc.lon);
+    setUcusHedefi({ lat: enlem, lng: boylam, zoom: 16 });
+    // Uçtuğumuz yere iğne bırak: kullanıcı haritanın tam olarak neresine
+    // bakıldığını görebilsin.
+    setAramaIsareti({
+      lat: enlem,
+      lng: boylam,
+      ad: (sonuc.display_name || '').split(',').slice(0, 3).join(',').trim(),
+    });
     setAramaSonuclari([]);
   };
 
@@ -453,8 +487,12 @@ function AnaUygulama({ oturum, rol }) {
         .single();
 
       if (eklemeHatasi) throw eklemeHatasi;
+
+      // v2 bu taramanın içine yazacak; önceki taramanın v2 sonucunu temizle
       setAktifTaramaId(kayit.id);
       setV2Sonuc(null);
+      setTarihce(null);
+      setAktifKonumAdi(konumAdi);
 
       // Uydunun konuma "yaklaştığı" animasyonu bir süre göster, sonra tarama evresine geç
       await beklet(1800);
@@ -514,11 +552,11 @@ function AnaUygulama({ oturum, rol }) {
     setHata(null);
     setSonuc(null);
     setV2Sonuc(null);
+    setTarihce(null);
     setAktifTaramaId(id);
     const { data, error } = await supabase
       .from('taramalar')
-      .select('sonuc, durum, hata_mesaji, koordinatlar')
-      .select('sonuc, sonuc_v2, durum, hata_mesaji, koordinatlar')
+      .select('sonuc, sonuc_v2, tarihce, durum, hata_mesaji, koordinatlar, konum_adi')
       .eq('id', id)
       .single();
 
@@ -529,9 +567,14 @@ function AnaUygulama({ oturum, rol }) {
     if (data.koordinatlar) {
       setOdaklanilacakAlan(data.koordinatlar);
     }
+    // v2 sonucu varsa onu da geri yükle — tek tarama, iki katman
     if (data.sonuc_v2) {
       setV2Sonuc(data.sonuc_v2);
     }
+    if (data.tarihce) {
+      setTarihce(data.tarihce);
+    }
+    setAktifKonumAdi(data.konum_adi || null);
     if (data.durum === 'Hata') {
       setHata('Bu tarama hatayla sonuçlanmıştı: ' + (data.hata_mesaji || 'Detay yok.'));
       return;
@@ -591,7 +634,7 @@ function AnaUygulama({ oturum, rol }) {
             <form onSubmit={konumAra} style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
               <input
                 type="text" value={aramaMetni} onChange={(e) => setAramaMetni(e.target.value)}
-                placeholder="Konum ara (yer adı, adres...)"
+                placeholder="Yer adı veya koordinat (39.4221, 38.5288)"
                 style={{ flex: 1, padding: '9px', borderRadius: '8px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '12px' }}
               />
               <button type="submit" disabled={aramaYukleniyor} style={{ padding: '0 12px', borderRadius: '8px', border: 'none', background: '#334155', color: 'white', cursor: 'pointer', fontSize: '13px' }}>
@@ -856,7 +899,9 @@ function AnaUygulama({ oturum, rol }) {
             <CizimAraci onAlanCizildi={alanCizildi} />
             {sonuc && sonucGorunur && katmanFiltre.v1 && <GeoJSON key={JSON.stringify(sonuc).length + '-' + katmanFiltre.siniflar.join('')} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} filter={(f) => katmanFiltre.siniflar.includes(Number(f.properties.sinif))} />}
             <ManyetikKatman ciziliAlan={ciziliAlan} optikSonuc={sonuc} taramaId={null} />
-           <AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} filtre={katmanFiltre} taramaId={aktifTaramaId} disSonuc={v2Sonuc} />
+            <AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} filtre={katmanFiltre} taramaId={aktifTaramaId} disSonuc={v2Sonuc} />
+            <AramaIsareti nokta={aramaIsareti} onTemizle={() => setAramaIsareti(null)} />
+            <TarihceKatmani ciziliAlan={ciziliAlan} taramaId={aktifTaramaId} konumAdi={aktifKonumAdi} disTarihce={tarihce} />
             <KatmanKontrol deger={katmanFiltre} onChange={setKatmanFiltre} />
             <GuvenlikKatmani rol={rol} />
           </MapContainer>
