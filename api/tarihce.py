@@ -28,7 +28,8 @@ Sana bir koordinat ve konum adı verilecek. O bölge hakkında kısa bir tarihse
   gibi her yere uyan cümleler kurma; sadece O BÖLGEYE dair spesifik bilgi ver.
 - Bölge küçükse, en yakın tarihi öneme sahip yerleşimi belirt ve uzaklığını yaz.
 
-ÇIKTI BİÇİMİ — sadece şu JSON'u döndür, başka hiçbir şey yazma:
+ÇIKTI BİÇİMİ — SADECE ham JSON döndür. Kod çerçevesi (``` işaretleri),
+açıklama, başlık, önsöz YAZMA. Yanıtın ilk karakteri { olmalı:
 {
   "medeniyetler": "Bölgede hüküm sürmüş medeniyetler ve dönemleri. 2-4 cümle.",
   "madencilik": "Bölgede bilinen antik veya tarihi madencilik faaliyeti: cüruf yığınları, eski galeriler, Osmanlı maden kayıtları, çıkarılan metaller. Kayıt yoksa açıkça belirt. 2-4 cümle.",
@@ -53,22 +54,71 @@ def kullanici_dogrula(kullanici_token):
 
 def json_ayikla(metin):
     """
-    Model bazen JSON'u ```json ... ``` bloğu içinde döndürür veya öncesine
-    açıklama ekler. Ham metinden ilk geçerli JSON nesnesini çıkarıyoruz.
+    Modelin ham metninden JSON nesnesini cikarir.
+
+    Model JSON'u su bicimlerde dondurebiliyor:
+      - duz JSON
+      - ```json ... ``` blogu icinde
+      - ``` ... ``` blogu icinde (dil etiketi yok)
+      - KAPANIS ISARETI EKSIK: ```json { ... }        <- ilk surumde bunu kaciriyordum
+      - oncesinde/sonrasinda aciklama metni ile
+
+    Bu yuzden kod cercevesini once temizliyor, sonra ilk { ile son }
+    arasini alip DENGELI parantez taramasi yapiyoruz.
     """
+    if not metin:
+        return None
+
     temiz = metin.strip()
-    if temiz.startswith("```"):
-        temiz = temiz.split("```")[1]
-        if temiz.startswith("json"):
-            temiz = temiz[4:]
-    bas = temiz.find("{")
-    son = temiz.rfind("}")
-    if bas == -1 or son == -1:
+
+    # Kod cercevesi isaretlerini temizle (kapanis olmasa da calisir)
+    if '```' in temiz:
+        parcalar = temiz.split('```')
+        # En uzun parcayi al: JSON govdesi genelde odur
+        aday = max(parcalar, key=len).strip()
+        if aday.lower().startswith('json'):
+            aday = aday[4:].strip()
+        temiz = aday
+
+    bas = temiz.find('{')
+    if bas == -1:
         return None
-    try:
-        return json.loads(temiz[bas:son + 1])
-    except json.JSONDecodeError:
-        return None
+
+    # Dengeli parantez taramasi: string icindeki susluleri saymaz
+    derinlik = 0
+    metin_icinde = False
+    kacis = False
+    for i in range(bas, len(temiz)):
+        ch = temiz[i]
+        if kacis:
+            kacis = False
+            continue
+        if ch == '\\':
+            kacis = True
+            continue
+        if ch == '"':
+            metin_icinde = not metin_icinde
+            continue
+        if metin_icinde:
+            continue
+        if ch == '{':
+            derinlik += 1
+        elif ch == '}':
+            derinlik -= 1
+            if derinlik == 0:
+                try:
+                    return json.loads(temiz[bas:i + 1])
+                except json.JSONDecodeError:
+                    break
+
+    # Dengeli kapanis yoksa (model yarida kesilmis olabilir) son } ile dene
+    son = temiz.rfind('}')
+    if son > bas:
+        try:
+            return json.loads(temiz[bas:son + 1])
+        except json.JSONDecodeError:
+            pass
+    return None
 
 
 def tarihce_uret(lat, lon, konum_adi):
@@ -97,6 +147,10 @@ def tarihce_uret(lat, lon, konum_adi):
             "temperature": 0.2,      # düşük: uydurmayı azaltır
             "maxOutputTokens": 1200,
         },
+        # NOT: response_mime_type="application/json" burada KULLANILAMAZ.
+        # Google Search grounding ile birlikte desteklenmiyor; ikisi aynı anda
+        # istenirse API hata veriyor. Grounding daha değerli olduğu için
+        # JSON'u prompt ile zorluyor, ayrıştırmayı json_ayikla ile sağlamlaştırıyoruz.
     }
 
     yanit = requests.post(

@@ -75,8 +75,9 @@ export default function AnalizV2({
   filtre = null,          // { v2: bool, siniflar: number[] } — KatmanKontrol'den gelir
   taramaId = null,        // v2 sonucu BU taramanın içine yazılır, ayrı kayıt açılmaz
   disSonuc = null,        // geçmişten yüklenen v2 GeoJSON'u
+  acik = false,           // panelin açık olup olmadığını AraçÇubugu belirler
+  onKapat = null,
 }) {
-  const [acik, setAcik] = useState(false);
   const [mineral, setMineral] = useState('altin');
   const [yerlesimMaskesi, setYerlesimMaskesi] = useState(true);
   const [hassasiyet, setHassasiyet] = useState('orta');
@@ -244,30 +245,22 @@ export default function AnalizV2({
         />
       )}
 
+      {acik && (
       <div style={{
-        position: 'absolute', right: 12, bottom: 70, zIndex: 1000,
+      position: 'absolute', right: 12, bottom: 62, zIndex: 1000,
+      maxHeight: 'calc(100vh - 150px)', overflowY: 'auto',
+      WebkitOverflowScrolling: 'touch',
         background: 'rgba(15,23,42,0.94)', color: '#e2e8f0',
-        borderRadius: 12, padding: acik ? 14 : 0,
-        width: acik ? 290 : 'auto', fontSize: 13,
+        borderRadius: 12, padding: 14,
+        width: 'min(300px, calc(100vw - 24px))', fontSize: 13,
         boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
       }}>
-        {!acik ? (
-          <button
-            onClick={() => setAcik(true)}
-            style={{
-              background: '#0891b2', color: '#fff', border: 'none',
-              borderRadius: 12, padding: '10px 16px', cursor: 'pointer',
-              fontSize: 13, fontWeight: 600,
-            }}
-          >
-            🔬 Gelişmiş Analiz (v2)
-          </button>
-        ) : (
+        {
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <b>🔬 Gelişmiş Analiz (v2)</b>
               <button
-                onClick={() => setAcik(false)}
+                onClick={() => onKapat && onKapat()}
                 style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 18 }}
               >×</button>
             </div>
@@ -487,8 +480,9 @@ export default function AnalizV2({
               </>
             )}
           </>
-        )}
+        }
       </div>
+      )}
     </>
   );
 }

@@ -21,8 +21,7 @@ const GUVEN_ETIKET = {
   dusuk: { ad: 'Genel bilgi — bölgeye özgü kayıt zayıf', renk: '#f97316' },
 };
 
-export default function TarihceKatmani({ ciziliAlan, taramaId, konumAdi, disTarihce }) {
-  const [acik, setAcik] = useState(false);
+export default function TarihceKatmani({ ciziliAlan, taramaId, konumAdi, disTarihce, acik = false, onKapat }) {
   const [tarihce, setTarihce] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [hata, setHata] = useState(null);
@@ -77,34 +76,27 @@ export default function TarihceKatmani({ ciziliAlan, taramaId, konumAdi, disTari
 
   const guven = GUVEN_ETIKET[tarihce?.guven] || GUVEN_ETIKET.dusuk;
 
+  if (!acik) return null;
+
   return (
     <div style={{
-      position: 'absolute', right: 12, bottom: acik ? 12 : 186, zIndex: 1000,
+      position: 'absolute', right: 12, bottom: 62, zIndex: 1000,
+      maxHeight: 'calc(100vh - 150px)', overflowY: 'auto',
+      WebkitOverflowScrolling: 'touch',
       background: 'rgba(15,23,42,0.94)', color: '#e2e8f0',
-      borderRadius: 12, padding: acik ? 14 : 0,
-      width: acik ? 300 : 'auto', fontSize: 13,
+      borderRadius: 12, padding: 14,
+      width: 'min(300px, calc(100vw - 24px))', fontSize: 13,
       maxHeight: 'calc(100vh - 160px)',
       overflowY: acik ? 'auto' : 'visible',
       boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
       WebkitOverflowScrolling: 'touch',
     }}>
-      {!acik ? (
-        <button
-          onClick={() => setAcik(true)}
-          style={{
-            background: '#78350f', color: '#fde68a', border: 'none',
-            borderRadius: 12, padding: '11px 17px', cursor: 'pointer',
-            fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
-          }}
-        >
-          📜 Tarihsel Bağlam
-        </button>
-      ) : (
+      {
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <b>📜 Tarihsel Bağlam</b>
             <button
-              onClick={() => setAcik(false)}
+              onClick={() => onKapat && onKapat()}
               style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 18 }}
             >×</button>
           </div>
@@ -206,7 +198,7 @@ export default function TarihceKatmani({ ciziliAlan, taramaId, konumAdi, disTari
             </>
           )}
         </>
-      )}
+      }
     </div>
   );
 }

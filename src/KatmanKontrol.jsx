@@ -1,4 +1,3 @@
-import { useState } from 'react';
 
 /*
  * KATMAN KONTROL
@@ -23,8 +22,7 @@ const SINIFLAR = [
   { deger: 0, ad: 'Anomali yok', renk: '#1e3a8a' },
 ];
 
-export default function KatmanKontrol({ deger, onChange }) {
-  const [acik, setAcik] = useState(false);
+export default function KatmanKontrol({ deger, onChange, acik = false, onKapat }) {
   const filtre = deger || VARSAYILAN_FILTRE;
 
   const motorDegistir = (motor) =>
@@ -45,50 +43,25 @@ export default function KatmanKontrol({ deger, onChange }) {
 
   const sadeceGuclu = () => onChange({ ...filtre, siniflar: [3, 4] });
 
+  if (!acik) return null;
+
   return (
     <div style={{
-      /*
-       * KONUM: sağ ÜST değil, sağ ALT.
-       *
-       * iPad'de sağ üstteki buton görünmüyordu; alt sağdaki paneller
-       * (Manyetik Katman, Gelişmiş Analiz) sorunsuz görünüyor. Bu yüzden
-       * üçünü aynı köşede istifliyoruz:
-       *   bottom  12 → Manyetik Katman
-       *   bottom  70 → Gelişmiş Analiz (v2)
-       *   bottom 128 → Katmanlar (bu bileşen)
-       *
-       * Panel açıldığında alta yaslanıp yukarı doğru büyür; ekrana
-       * sığmazsa kendi içinde kayar (küçük ekranlarda taşmayı önler).
-       */
-      position: 'absolute',
-      right: 12,
-      bottom: acik ? 12 : 128,
-      zIndex: 1000,
+      position: 'absolute', right: 12, bottom: 62, zIndex: 1000,
       background: 'rgba(15,23,42,0.94)', color: '#e2e8f0',
-      borderRadius: 12, padding: acik ? 14 : 0,
-      width: acik ? 236 : 'auto', fontSize: 13,
+      borderRadius: 12, padding: 14,
+      width: 'min(300px, calc(100vw - 24px))', fontSize: 13,
       maxHeight: 'calc(100vh - 160px)',
       overflowY: acik ? 'auto' : 'visible',
       boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
       WebkitOverflowScrolling: 'touch',
     }}>
-      {!acik ? (
-        <button
-          onClick={() => setAcik(true)}
-          style={{
-            background: '#334155', color: '#e2e8f0', border: 'none',
-            borderRadius: 12, padding: '11px 17px', cursor: 'pointer',
-            fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
-          }}
-        >
-          🎚️ Katmanlar
-        </button>
-      ) : (
+      {
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <b>🎚️ Katmanlar</b>
             <button
-              onClick={() => setAcik(false)}
+              onClick={() => onKapat && onKapat()}
               style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 18 }}
             >×</button>
           </div>
@@ -163,7 +136,7 @@ export default function KatmanKontrol({ deger, onChange }) {
             </button>
           </div>
         </>
-      )}
+      }
     </div>
   );
 }

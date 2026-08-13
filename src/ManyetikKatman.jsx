@@ -103,8 +103,7 @@ function cerceveBilgi(feature, layer) {
   );
 }
 
-export default function ManyetikKatman({ ciziliAlan, optikSonuc, taramaId }) {
-  const [acik, setAcik] = useState(false);
+export default function ManyetikKatman({ ciziliAlan, optikSonuc, taramaId, acik = false, onKapat }) {
   const [profil, setProfil] = useState('altin');
   const [gridGorunur, setGridGorunur] = useState(true);
   const [cerceveGorunur, setCerceveGorunur] = useState(true);
@@ -185,30 +184,22 @@ export default function ManyetikKatman({ ciziliAlan, optikSonuc, taramaId }) {
       )}
 
       {/* --- KONTROL PANELİ --- */}
+      {acik && (
       <div style={{
-        position: 'absolute', right: 12, bottom: 12, zIndex: 1000,
+      position: 'absolute', right: 12, bottom: 62, zIndex: 1000,
+      maxHeight: 'calc(100vh - 150px)', overflowY: 'auto',
+      WebkitOverflowScrolling: 'touch',
         background: 'rgba(15,23,42,0.94)', color: '#e2e8f0',
-        borderRadius: 12, padding: acik ? 14 : 0,
-        width: acik ? 290 : 'auto', fontSize: 13,
+        borderRadius: 12, padding: 14,
+        width: 'min(300px, calc(100vw - 24px))', fontSize: 13,
         boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
       }}>
-        {!acik ? (
-          <button
-            onClick={() => setAcik(true)}
-            style={{
-              background: '#7c3aed', color: '#fff', border: 'none',
-              borderRadius: 12, padding: '10px 16px', cursor: 'pointer',
-              fontSize: 13, fontWeight: 600,
-            }}
-          >
-            🧲 Manyetik Katman
-          </button>
-        ) : (
+        {
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <b>🧲 Manyetik Analiz</b>
               <button
-                onClick={() => setAcik(false)}
+                onClick={() => onKapat && onKapat()}
                 style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 18 }}
               >×</button>
             </div>
@@ -330,8 +321,9 @@ export default function ManyetikKatman({ ciziliAlan, optikSonuc, taramaId }) {
               </>
             )}
           </>
-        )}
+        }
       </div>
+      )}
     </>
   );
 }

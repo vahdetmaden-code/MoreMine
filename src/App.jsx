@@ -12,6 +12,7 @@ import GuvenlikKatmani from './GuvenlikKatmani';
 import KatmanKontrol, { VARSAYILAN_FILTRE } from './KatmanKontrol';
 import AramaIsareti from './AramaIsareti';
 import TarihceKatmani from './TarihceKatmani';
+import AracCubugu from './AracCubugu';
 
 // Sınıf değerine göre renk (motor.py / api/analyze.py ile birebir aynı olmalı)
 const RENKLER = {
@@ -245,6 +246,8 @@ function AnaUygulama({ oturum, rol }) {
   const [v2Sonuc, setV2Sonuc] = useState(null);
   const [tarihce, setTarihce] = useState(null);
   const [aktifKonumAdi, setAktifKonumAdi] = useState(null);
+  // Aynı anda yalnızca bir panel açık olsun (üst üste binmeyi önler)
+  const [acikPanel, setAcikPanel] = useState(null);
   const [sonucGorunur, setSonucGorunur] = useState(true);
   const [odaklanilacakAlan, setOdaklanilacakAlan] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
@@ -556,7 +559,7 @@ function AnaUygulama({ oturum, rol }) {
     setAktifTaramaId(id);
     const { data, error } = await supabase
       .from('taramalar')
-      .select('sonuc, sonuc_v2, tarihce, durum, hata_mesaji, koordinatlar, konum_adi')
+      .select('sonuc, sonuc_v2, durum, hata_mesaji, koordinatlar, konum_adi')
       .eq('id', id)
       .single();
 
@@ -571,10 +574,23 @@ function AnaUygulama({ oturum, rol }) {
     if (data.sonuc_v2) {
       setV2Sonuc(data.sonuc_v2);
     }
-    if (data.tarihce) {
-      setTarihce(data.tarihce);
-    }
     setAktifKonumAdi(data.konum_adi || null);
+
+    /*
+     * Tarihçe AYRI sorguyla çekiliyor.
+     * Sebep: "tarihce" sütunu veritabanında henüz yoksa (SQL çalıştırılmadıysa)
+     * Supabase tüm sorguyu reddediyor ve tarama hiç açılmıyordu. Ayrı sorguda
+     * hata olursa sessizce geçiyoruz — tarama yine de açılıyor.
+     */
+    supabase
+      .from('taramalar')
+      .select('tarihce')
+      .eq('id', id)
+      .single()
+      .then(({ data: tarihceKaydi }) => {
+        if (tarihceKaydi?.tarihce) setTarihce(tarihceKaydi.tarihce);
+      })
+      .catch(() => { /* sütun yok veya okunamadı, sorun değil */ });
     if (data.durum === 'Hata') {
       setHata('Bu tarama hatayla sonuçlanmıştı: ' + (data.hata_mesaji || 'Detay yok.'));
       return;
@@ -898,11 +914,12 @@ function AnaUygulama({ oturum, rol }) {
             <CanliKonumKatmani aktif={canliKonumAktif} />
             <CizimAraci onAlanCizildi={alanCizildi} />
             {sonuc && sonucGorunur && katmanFiltre.v1 && <GeoJSON key={JSON.stringify(sonuc).length + '-' + katmanFiltre.siniflar.join('')} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} filter={(f) => katmanFiltre.siniflar.includes(Number(f.properties.sinif))} />}
-            <ManyetikKatman ciziliAlan={ciziliAlan} optikSonuc={sonuc} taramaId={null} />
-            <AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} filtre={katmanFiltre} taramaId={aktifTaramaId} disSonuc={v2Sonuc} />
+            <ManyetikKatman ciziliAlan={ciziliAlan} optikSonuc={sonuc} taramaId={null} acik={acikPanel === 'manyetik'} onKapat={() => setAcikPanel(null)} />
+            <AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} filtre={katmanFiltre} taramaId={aktifTaramaId} disSonuc={v2Sonuc} acik={acikPanel === 'v2'} onKapat={() => setAcikPanel(null)} />
             <AramaIsareti nokta={aramaIsareti} onTemizle={() => setAramaIsareti(null)} />
-            <TarihceKatmani ciziliAlan={ciziliAlan} taramaId={aktifTaramaId} konumAdi={aktifKonumAdi} disTarihce={tarihce} />
-            <KatmanKontrol deger={katmanFiltre} onChange={setKatmanFiltre} />
+            <TarihceKatmani ciziliAlan={ciziliAlan} taramaId={aktifTaramaId} konumAdi={aktifKonumAdi} disTarihce={tarihce} acik={acikPanel === 'tarihce'} onKapat={() => setAcikPanel(null)} />
+            <KatmanKontrol deger={katmanFiltre} onChange={setKatmanFiltre} acik={acikPanel === 'katman'} onKapat={() => setAcikPanel(null)} />
+            <AracCubugu acik={acikPanel} onDegis={setAcikPanel} />
             <GuvenlikKatmani rol={rol} />
           </MapContainer>
 
