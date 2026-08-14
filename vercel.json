@@ -12,6 +12,9 @@
     "api/analyze_v2.py": {
       "maxDuration": 300
     },
+    "api/analyze_v3.py": {
+      "maxDuration": 300
+    },
     "api/tarihce.py": {
       "maxDuration": 60
     }

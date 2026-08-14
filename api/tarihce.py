@@ -31,9 +31,9 @@ Sana bir koordinat ve konum adı verilecek. O bölge hakkında kısa bir tarihse
 ÇIKTI BİÇİMİ — SADECE ham JSON döndür. Kod çerçevesi (``` işaretleri),
 açıklama, başlık, önsöz YAZMA. Yanıtın ilk karakteri { olmalı:
 {
-  "medeniyetler": "Bölgede hüküm sürmüş medeniyetler ve dönemleri. 2-4 cümle.",
-  "madencilik": "Bölgede bilinen antik veya tarihi madencilik faaliyeti: cüruf yığınları, eski galeriler, Osmanlı maden kayıtları, çıkarılan metaller. Kayıt yoksa açıkça belirt. 2-4 cümle.",
-  "jeolojik_not": "Bölgenin jeolojik yapısı ve maden potansiyeli hakkında bilinen bilgi. 1-3 cümle.",
+  "medeniyetler": "Bölgede hüküm sürmüş medeniyetler, dönemleri ve neden geldikleri/gittikleri. Bilinen yerleşim adları, höyükler, kaleler. 5-8 cümle, DETAYLI yaz.",
+  "madencilik": "Bölgede bilinen antik veya tarihi madencilik faaliyeti: cüruf yığınları, eski galeriler, Osmanlı maden kayıtları, çıkarılan metaller, taş ocakları, tuz/mermer işletmeleri. Hangi dönemde, hangi metal, nerede. Kayıt yoksa açıkça belirt. 5-8 cümle, DETAYLI yaz.",
+  "jeolojik_not": "Bölgenin jeolojik yapısı, kayaç türleri, fay hatları ve bilinen maden potansiyeli. 3-5 cümle.",
   "guven": "yuksek | orta | dusuk — bulduğun bilginin bölgeye ne kadar özgü olduğuna göre"
 }
 
@@ -111,13 +111,39 @@ def json_ayikla(metin):
                 except json.JSONDecodeError:
                     break
 
-    # Dengeli kapanis yoksa (model yarida kesilmis olabilir) son } ile dene
+    # Dengeli kapanis yoksa son } ile dene
     son = temiz.rfind('}')
     if son > bas:
         try:
             return json.loads(temiz[bas:son + 1])
         except json.JSONDecodeError:
             pass
+
+    # ONARIM: model token sinirina takilip cumlenin ortasinda kesilmis olabilir.
+    # Acik string'i ve acik susluleri kapatip tekrar deniyoruz. Boylece
+    # yarim gelen cevabin OKUNABILEN kismi yine de yapili sekilde gosterilir.
+    govde = temiz[bas:]
+    tirnak = 0
+    kacis = False
+    for ch in govde:
+        if kacis:
+            kacis = False
+            continue
+        if ch == '\\':
+            kacis = True
+            continue
+        if ch == '"':
+            tirnak += 1
+    onarilmis = govde
+    if tirnak % 2 == 1:          # acik kalmis string
+        onarilmis += '"'
+    acik = onarilmis.count('{') - onarilmis.count('}')
+    onarilmis += '}' * max(0, acik)
+    try:
+        return json.loads(onarilmis)
+    except json.JSONDecodeError:
+        pass
+
     return None
 
 
@@ -145,7 +171,7 @@ def tarihce_uret(lat, lon, konum_adi):
         "tools": [{"google_search": {}}],
         "generationConfig": {
             "temperature": 0.2,      # düşük: uydurmayı azaltır
-            "maxOutputTokens": 1200,
+            "maxOutputTokens": 8192,
         },
         # NOT: response_mime_type="application/json" burada KULLANILAMAZ.
         # Google Search grounding ile birlikte desteklenmiyor; ikisi aynı anda
@@ -175,7 +201,7 @@ def tarihce_uret(lat, lon, konum_adi):
     if not ayiklanan:
         # JSON çıkmadıysa ham metni tek alanda göster — boş dönmektense iyi
         return {
-            "medeniyetler": ham_metin[:900],
+            "medeniyetler": ham_metin,
             "madencilik": "",
             "jeolojik_not": "",
             "guven": "dusuk",

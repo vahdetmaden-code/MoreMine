@@ -12,6 +12,7 @@ import GuvenlikKatmani from './GuvenlikKatmani';
 import KatmanKontrol, { VARSAYILAN_FILTRE } from './KatmanKontrol';
 import AramaIsareti from './AramaIsareti';
 import TarihceKatmani from './TarihceKatmani';
+import AnalizV3 from './AnalizV3';
 import AracCubugu from './AracCubugu';
 
 // Sınıf değerine göre renk (motor.py / api/analyze.py ile birebir aynı olmalı)
@@ -919,6 +920,7 @@ function AnaUygulama({ oturum, rol }) {
             <AramaIsareti nokta={aramaIsareti} onTemizle={() => setAramaIsareti(null)} />
             <TarihceKatmani ciziliAlan={ciziliAlan} taramaId={aktifTaramaId} konumAdi={aktifKonumAdi} disTarihce={tarihce} acik={acikPanel === 'tarihce'} onKapat={() => setAcikPanel(null)} />
             <KatmanKontrol deger={katmanFiltre} onChange={setKatmanFiltre} acik={acikPanel === 'katman'} onKapat={() => setAcikPanel(null)} />
+            <AnalizV3 ciziliAlan={ciziliAlan} filtre={katmanFiltre} acik={acikPanel === 'v3'} onKapat={() => setAcikPanel(null)} />
             <AracCubugu acik={acikPanel} onDegis={setAcikPanel} />
             <GuvenlikKatmani rol={rol} />
           </MapContainer>
