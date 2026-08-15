@@ -1,6 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { GeoJSON } from 'react-leaflet';
 import { supabase } from './supabaseClient';
+import { RENKLER as SINIF_RENK, ETIKETLER as SINIF_AD, ONERILER as SINIF_ONERI, MINERAL_ETIKETLERI } from './siniflar';
 
 /*
  * ANALİZ v3 PANELİ — Crósta PCA + demir/kil birlikteliği
@@ -18,8 +19,6 @@ const HASSASIYETLER = [
   { deger: 'dusuk', etiket: 'Düşük', aciklama: 'Bölgenin üst %7\'si' },
 ];
 
-const SINIF_RENK = { 1: '#22c55e', 2: '#facc15', 3: '#f97316', 4: '#ef4444' };
-const SINIF_AD = { 1: 'Zayıf Etki', 2: 'Orta Etki', 3: 'Güçlü Etki', 4: 'ÇOK GÜÇLÜ ETKİ' };
 
 function v3Stil(feature) {
   const sinif = feature.properties.sinif || 1;
@@ -59,7 +58,7 @@ function v3Bilgi(feature, layer) {
   );
 }
 
-export default function AnalizV3({ ciziliAlan, filtre = null, acik = false, onKapat }) {
+export default function AnalizV3({ ciziliAlan, filtre = null, tetikleyici = 0, acik = false, onKapat }) {
   const [hassasiyet, setHassasiyet] = useState('orta');
   const [yerlesimMaskesi, setYerlesimMaskesi] = useState(true);
   const [gorunur, setGorunur] = useState(true);
@@ -113,6 +112,18 @@ export default function AnalizV3({ ciziliAlan, filtre = null, acik = false, onKa
       setYukleniyor(false);
     }
   }, [ciziliAlan, alanHazir, hassasiyet, yerlesimMaskesi]);
+
+  /*
+   * OTOMATİK TETİKLEME
+   * App.jsx "Taramayı Başlat" akışında v1 bittiğinde tetikleyiciyi artırır;
+   * bu efekt onu görüp analizi kendiliğinden başlatır. Kullanıcı üç motoru
+   * tek tuşla çalıştırabilsin diye.
+   */
+  useEffect(() => {
+    if (tetikleyici > 0 && alanHazir) analizEt();
+    // analizEt bilerek bağımlılıkta değil: ayar değişince yeniden tetiklenmesin
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tetikleyici]);
 
   const temizSonuc = (() => {
     const ham = sonuc?.sonuc;
@@ -247,6 +258,20 @@ export default function AnalizV3({ ciziliAlan, filtre = null, acik = false, onKa
                 <span>v3 sonucunu göster</span>
               </label>
 
+              {/* Bileşen seçimi şüpheliyse uyar */}
+              {sonuc.crosta?.supheli && (
+                <div style={{
+                  background: '#78350f', padding: 9, borderRadius: 6,
+                  marginBottom: 10, fontSize: 11.5, lineHeight: 1.55,
+                }}>
+                  <b>Bileşen seçimi zayıf.</b><br />
+                  Bu alanda demir/kil sinyalleri birbirinden net ayrışmadı
+                  (kil güven {sonuc.crosta.kil_guven}, demir güven {sonuc.crosta.demir_guven}).
+                  Sonuçlara temkinli yaklaş; daha geniş veya daha çıplak bir
+                  alan denemek ayrımı güçlendirebilir.
+                </div>
+              )}
+
               {/* AYRIM TABLOSU — v3'ün asıl cevabı */}
               {ayrim && toplamIsaretli > 0 && (
                 <div style={{
@@ -293,10 +318,16 @@ export default function AnalizV3({ ciziliAlan, filtre = null, acik = false, onKa
                   <span>Kullanılan görüntü</span><b>{sonuc.goruntu_sayisi}</b>
                 </div>
                 {sonuc.crosta && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8' }}>
-                    <span>Bileşenler</span>
-                    <span>kil {sonuc.crosta.kil_bileseni} · demir {sonuc.crosta.demir_bileseni}</span>
-                  </div>
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8' }}>
+                      <span>Kil bileşeni</span>
+                      <span>{sonuc.crosta.kil_bileseni} · varyans %{Math.round((sonuc.crosta.kil_varyans || 0) * 100)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8' }}>
+                      <span>Demir bileşeni</span>
+                      <span>{sonuc.crosta.demir_bileseni} · varyans %{Math.round((sonuc.crosta.demir_varyans || 0) * 100)}</span>
+                    </div>
+                  </>
                 )}
               </div>
 

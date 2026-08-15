@@ -1,6 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { GeoJSON } from 'react-leaflet';
 import { supabase } from './supabaseClient';
+import { RENKLER as SINIF_RENK, ETIKETLER as SINIF_AD, ONERILER as SINIF_ONERI, MINERAL_ETIKETLERI } from './siniflar';
 
 /*
  * ANALİZ v2 PANELİ
@@ -11,12 +12,8 @@ import { supabase } from './supabaseClient';
  * v2 poligonları kesikli çizgiyle çizilir ki v1'inkilerden ayırt edilsin.
  */
 
-const MINERALLER = [
-  { deger: 'altin', etiket: 'Altın' },
-  { deger: 'bakir', etiket: 'Bakır' },
-  { deger: 'demir', etiket: 'Demir' },
-  { deger: 'genel', etiket: 'Genel' },
-];
+const MINERALLER = Object.entries(MINERAL_ETIKETLERI)
+  .map(([deger, etiket]) => ({ deger, etiket }));
 
 const HASSASIYETLER = [
   { deger: 'yuksek', etiket: 'Yüksek', aciklama: 'Bölgenin üst %30\'u — çok sinyal' },
@@ -24,24 +21,11 @@ const HASSASIYETLER = [
   { deger: 'dusuk', etiket: 'Düşük', aciklama: 'Bölgenin üst %7\'si — en güçlüler' },
 ];
 
-const SINIF_RENK = { 1: '#22c55e', 2: '#facc15', 3: '#f97316', 4: '#ef4444' };
 
 // Sınıf adları ve her sınıf için önerilen saha adımı.
 // v1'deki RENKLER/ETIKETLER ile birebir aynı renk kodları kullanılıyor ki
 // iki motorun çıktısı görsel olarak karşılaştırılabilsin.
-const SINIF_AD = {
-  1: 'Zayıf etki',
-  2: 'Orta etki',
-  3: 'Güçlü etki',
-  4: 'Çok güçlü etki',
-};
 
-const SINIF_ONERI = {
-  1: 'Kayda değer değil, geçilebilir.',
-  2: 'Not al, çevresiyle birlikte değerlendir.',
-  3: 'Saha ziyareti planla, yüzey örneği al.',
-  4: 'Öncelikli saha kontrolü — altın tanıyan dedektörle incele.',
-};
 
 function v2Stil(feature) {
   const sinif = feature.properties.sinif || 1;
@@ -75,6 +59,7 @@ export default function AnalizV2({
   filtre = null,          // { v2: bool, siniflar: number[] } — KatmanKontrol'den gelir
   taramaId = null,        // v2 sonucu BU taramanın içine yazılır, ayrı kayıt açılmaz
   disSonuc = null,        // geçmişten yüklenen v2 GeoJSON'u
+  tetikleyici = 0,        // App.jsx artırınca analiz kendiliğinden başlar
   acik = false,           // panelin açık olup olmadığını AraçÇubugu belirler
   onKapat = null,
 }) {
@@ -179,6 +164,18 @@ export default function AnalizV2({
       setYukleniyor(false);
     }
   }, [ciziliAlan, alanHazir, mineral, yerlesimMaskesi, hassasiyet, taramaId, onKaydedildi]);
+
+  /*
+   * OTOMATİK TETİKLEME
+   * App.jsx "Taramayı Başlat" akışında v1 bittiğinde tetikleyiciyi artırır;
+   * bu efekt onu görüp analizi kendiliğinden başlatır. Kullanıcı üç motoru
+   * tek tuşla çalıştırabilsin diye.
+   */
+  useEffect(() => {
+    if (tetikleyici > 0 && alanHazir) analizEt();
+    // analizEt bilerek bağımlılıkta değil: ayar değişince yeniden tetiklenmesin
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tetikleyici]);
 
   /*
    * Leaflet'e verilmeden önce geometriyi TEMİZLE.

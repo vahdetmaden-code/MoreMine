@@ -14,25 +14,7 @@ import AramaIsareti from './AramaIsareti';
 import TarihceKatmani from './TarihceKatmani';
 import AnalizV3 from './AnalizV3';
 import AracCubugu from './AracCubugu';
-
-// Sınıf değerine göre renk (motor.py / api/analyze.py ile birebir aynı olmalı)
-const RENKLER = {
-  '-1': '#9ca3af', // Analiz Dışı (su/bitki/yerleşim)
-  '0': '#1e3a8a',  // Anomali Yok
-  '1': '#22c55e',  // Zayıf
-  '2': '#facc15',  // Orta
-  '3': '#f97316',  // Güçlü
-  '4': '#ef4444',  // Çok Güçlü
-};
-
-const ETIKETLER = {
-  '-1': 'Analiz Dışı (su / bitki örtüsü)',
-  '0': 'Anomali Yok',
-  '1': 'Zayıf Anomali',
-  '2': 'Orta Anomali',
-  '3': 'Güçlü Anomali',
-  '4': 'Çok Güçlü Anomali (öncelikli inceleme)',
-};
+import { RENKLER, ETIKETLER, ONERILER, MINERAL_ETIKETLERI } from './siniflar';
 
 function geojsonStil(feature) {
   const sinif = String(feature.properties.sinif);
@@ -46,7 +28,11 @@ function geojsonStil(feature) {
 
 function ciziliAlaniGoster(feature, layer) {
   const sinif = String(feature.properties.sinif);
-  layer.bindTooltip(ETIKETLER[sinif] || 'Bilinmiyor');
+  const oneri = ONERILER[sinif];
+  layer.bindTooltip(
+    `<b>v1 — ${ETIKETLER[sinif] || 'Bilinmiyor'}</b>` +
+    (oneri ? `<br/><i>${oneri}</i>` : '')
+  );
 }
 
 // Haritaya çizim aracını (Geoman) ekleyen ve çizilen alanı üst bileşene bildiren yardımcı bileşen
@@ -249,6 +235,9 @@ function AnaUygulama({ oturum, rol }) {
   const [aktifKonumAdi, setAktifKonumAdi] = useState(null);
   // Aynı anda yalnızca bir panel açık olsun (üst üste binmeyi önler)
   const [acikPanel, setAcikPanel] = useState(null);
+  // "Taramayı Başlat" sonrası v2 ve v3'ü de otomatik çalıştırmak için sayaç
+  const [tumMotorlar, setTumMotorlar] = useState(true);
+  const [zincirTetik, setZincirTetik] = useState(0);
   const [sonucGorunur, setSonucGorunur] = useState(true);
   const [odaklanilacakAlan, setOdaklanilacakAlan] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
@@ -262,12 +251,6 @@ function AnaUygulama({ oturum, rol }) {
   const [ozelBaslangic, setOzelBaslangic] = useState('');
   const [ozelBitis, setOzelBitis] = useState('');
   const [hedefMineral, setHedefMineral] = useState('altin');
-  const MINERAL_ETIKETLERI = {
-    altin: 'Altın',
-    bakir: 'Bakır',
-    demir: 'Demir',
-    genel: 'Genel Keşif',
-  };
   const [sonKullanilanTarihler, setSonKullanilanTarihler] = useState(null);
   const [aramaMetni, setAramaMetni] = useState('');
   const [aramaIsareti, setAramaIsareti] = useState(null);
@@ -531,6 +514,8 @@ function AnaUygulama({ oturum, rol }) {
       setSonKullanilanTarihler(cevap.kullanilan_tarihler || null);
       setAsama('tamamlandı');
       gecmisiYukle();
+      // v1 bitti; istenirse v2 ve v3 kendiliğinden devam etsin
+      if (tumMotorlar) setZincirTetik((v) => v + 1);
       await beklet(1400);
     } catch (e) {
       console.error(e);
@@ -744,6 +729,11 @@ function AnaUygulama({ oturum, rol }) {
             </select>
           </div>
 
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', fontSize: '12px', color: '#94a3b8', cursor: 'pointer' }}>
+            <input type="checkbox" checked={tumMotorlar} onChange={(e) => setTumMotorlar(e.target.checked)} />
+            Tarama sonrası v2 ve v3 de çalışsın
+          </label>
+
           <button
             onClick={taramayiBaslat}
             disabled={yukleniyor}
@@ -916,11 +906,11 @@ function AnaUygulama({ oturum, rol }) {
             <CizimAraci onAlanCizildi={alanCizildi} />
             {sonuc && sonucGorunur && katmanFiltre.v1 && <GeoJSON key={JSON.stringify(sonuc).length + '-' + katmanFiltre.siniflar.join('')} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} filter={(f) => katmanFiltre.siniflar.includes(Number(f.properties.sinif))} />}
             <ManyetikKatman ciziliAlan={ciziliAlan} optikSonuc={sonuc} taramaId={null} acik={acikPanel === 'manyetik'} onKapat={() => setAcikPanel(null)} />
-            <AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} filtre={katmanFiltre} taramaId={aktifTaramaId} disSonuc={v2Sonuc} acik={acikPanel === 'v2'} onKapat={() => setAcikPanel(null)} />
+            <AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} filtre={katmanFiltre} taramaId={aktifTaramaId} disSonuc={v2Sonuc} tetikleyici={zincirTetik} acik={acikPanel === 'v2'} onKapat={() => setAcikPanel(null)} />
             <AramaIsareti nokta={aramaIsareti} onTemizle={() => setAramaIsareti(null)} />
             <TarihceKatmani ciziliAlan={ciziliAlan} taramaId={aktifTaramaId} konumAdi={aktifKonumAdi} disTarihce={tarihce} acik={acikPanel === 'tarihce'} onKapat={() => setAcikPanel(null)} />
             <KatmanKontrol deger={katmanFiltre} onChange={setKatmanFiltre} acik={acikPanel === 'katman'} onKapat={() => setAcikPanel(null)} />
-            <AnalizV3 ciziliAlan={ciziliAlan} filtre={katmanFiltre} acik={acikPanel === 'v3'} onKapat={() => setAcikPanel(null)} />
+            <AnalizV3 ciziliAlan={ciziliAlan} filtre={katmanFiltre} tetikleyici={zincirTetik} acik={acikPanel === 'v3'} onKapat={() => setAcikPanel(null)} />
             <AracCubugu acik={acikPanel} onDegis={setAcikPanel} />
             <GuvenlikKatmani rol={rol} />
           </MapContainer>

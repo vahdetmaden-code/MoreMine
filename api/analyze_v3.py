@@ -51,8 +51,25 @@ BOLGESEL_TAMPON = 25000
 # Crosta band setleri.
 # Klasik Crosta Landsat TM1,3,4,5 / TM1,3,4,7 ikilisini kullanir.
 # Sentinel-2 karsiliklari:
-KIL_BANTLARI = ['B2', 'B4', 'B8A', 'B11']    # hidroksil / kil-serisit
-DEMIR_BANTLARI = ['B2', 'B4', 'B8A', 'B12']  # demir oksit / hematit-goetit
+# Klasik Crosta band setleri (Landsat TM karsiliklariyla):
+#   Hidroksil/kil : TM 1,4,5,7  -> B2, B8A, B11, B12
+#       Kil 2.2 um'de SOGURUR (B12 dusuk), 1.6 um'de YANSITIR (B11 yuksek).
+#       Ayirt edici kontrast B11 vs B12'dir.
+#   Demir oksit   : TM 1,3,4,5  -> B2, B4, B8A, B11
+#       Demir oksit kirmizida (B4) YANSITIR, mavide (B2) SOGURUR.
+#
+# ILK SURUMDE kil setinde B4/B8A kontrasti kullaniyordum; bu mineralojik
+# olarak yanlisti ve kil sinyalini zayiflatiyordu.
+KIL_BANTLARI = ['B2', 'B8A', 'B11', 'B12']
+KIL_HEDEF, KIL_KARSIT = 2, 3        # B11 parlak, B12 karanlik
+
+DEMIR_BANTLARI = ['B2', 'B4', 'B8A', 'B11']
+DEMIR_HEDEF, DEMIR_KARSIT = 1, 0    # B4 parlak, B2 karanlik
+
+# Varyans payi bunun altinda kalan bilesenler gurultu sayilir.
+# Ozvektorler birim uzunlukta oldugu icin bir GURULTU bileseni de buyuk
+# yuklere sahip gorunebiliyor; varyans suzgeci olmadan secim onu kapiyordu.
+MIN_VARYANS_PAYI = 0.02
 
 HASSASIYET_YUZDELIK = {
     'yuksek': [70, 84, 93, 98],
@@ -135,51 +152,67 @@ def temel_bilesenler(goruntu, bantlar, bolge, maske):
     )
     kov_dizi = ee.Array(kovaryans.get('array'))
     ozcozum = kov_dizi.eigen()                 # [n, n+1]
-    ozvektorler = ozcozum.slice(1, 1)          # ilk sutun ozdegerler, gerisi vektorler
+    ozdegerler = ozcozum.slice(1, 0, 1)        # ilk sutun = ozdegerler
+    ozvektorler = ozcozum.slice(1, 1)          # gerisi = ozvektorler (satir = bilesen)
 
-    yukler = ozvektorler.getInfo()             # satir = bilesen, sutun = band
+    yukler = ozvektorler.getInfo()
+    ozdeger_listesi = [satir[0] for satir in ozdegerler.getInfo()]
 
     bilesenler = ee.Image(ozvektorler) \
         .matrixMultiply(diziler.toArray(1)) \
         .arrayProject([0]) \
         .arrayFlatten([[f'pc{i + 1}' for i in range(len(bantlar))]])
 
-    return bilesenler, yukler
+    return bilesenler, yukler, ozdeger_listesi
 
 
-def crosta_bileseni_sec(yukler, hedef_ix, karsit_ix):
+def crosta_bileseni_sec(ozdegerler, yukler, hedef_ix, karsit_ix):
     """
     Aradigimiz mineral hangi temel bilesende?
 
-    Crosta kurali: hedef mineralin PARLAK oldugu band ile KARANLIK oldugu
-    band, o bilesende ZIT ISARETLI ve buyuk yuklu olmalidir. Sadece
-    "en buyuk yuk" aramak yetmez — birinci bilesen neredeyse her zaman
-    genel parlaklıktır (albedo) ve mineraloji tasimaz.
+    UC ELEME, sirayla:
 
-    Doner: (bilesen_indeksi, isaret_carpani)
-      isaret_carpani: hedef bandin yuku negatifse -1 ile carpip yonu
-      duzeltiyoruz ki YUKSEK deger = COK mineral anlamina gelsin.
+      1) ALBEDO ELEMESI — tum yukleri AYNI ISARETLI olan bilesen genel
+         parlakliktir, mineraloji tasimaz.
+         DIKKAT: "PC1'i atla" demek YANLISTIR. Ilk surumde oyle yapiyordum
+         ve testte PC1'in gercek demir bileseni oldugu (korelasyon +1.00)
+         ortaya cikti. Albedo'yu SIRA ile degil ISARET DESENI ile taniyoruz.
+
+      2) GURULTU ELEMESI — varyans payi MIN_VARYANS_PAYI altindakiler.
+         Ozvektorler birim uzunlukta oldugu icin son bilesenler de buyuk
+         yuke sahip gorunur; varyans suzgeci olmadan secim onlari kapiyordu.
+
+      3) CROSTA KONTRASTI — hedef mineralin parlak oldugu band ile karanlik
+         oldugu band ZIT ISARETLI olmali. Puan varyans payiyla agirliklanir.
+
+    Doner: (bilesen_indeksi, isaret_carpani, hedef_yuk_buyuklugu)
+      isaret_carpani: hedef bandin yuku negatifse -1; boylece YUKSEK deger
+      her zaman COK mineral demek olur.
+      hedef_yuk_buyuklugu: guven gostergesi. 0.5+ saglam, 0.3 alti supheli.
     """
-    en_iyi_ix, en_iyi_puan, en_iyi_isaret = None, -1.0, 1
+    toplam = sum(ozdegerler) or 1.0
+    en_iyi_ix, en_iyi_puan, en_iyi_isaret, en_iyi_yuk = None, -1.0, 1, 0.0
 
-    for i, satir in enumerate(yukler):
-        if i == 0:
-            continue                      # PC1 = albedo, atla
-        h, k = satir[hedef_ix], satir[karsit_ix]
-        if h == 0 or k == 0:
+    for i, (ozdeger, satir) in enumerate(zip(ozdegerler, yukler)):
+        pay = ozdeger / toplam
+        if pay < MIN_VARYANS_PAYI:
             continue
-        if (h > 0) == (k > 0):
-            continue                      # ayni isaretli -> Crosta kontrasti yok
-        puan = abs(h) + abs(k)
+        if all(x > 0 for x in satir) or all(x < 0 for x in satir):
+            continue                                   # albedo
+        h, k = satir[hedef_ix], satir[karsit_ix]
+        if h == 0 or k == 0 or (h > 0) == (k > 0):
+            continue                                   # Crosta kontrasti yok
+        puan = (abs(h) + abs(k)) * (pay ** 0.5)
         if puan > en_iyi_puan:
-            en_iyi_ix, en_iyi_puan, en_iyi_isaret = i, puan, (1 if h > 0 else -1)
+            en_iyi_ix, en_iyi_puan = i, puan
+            en_iyi_isaret, en_iyi_yuk = (1 if h > 0 else -1), abs(h)
 
     if en_iyi_ix is None:
-        # Zit isaretli bilesen bulunamadi (nadir). PC2'ye dus, yonu hedefe gore ayarla.
-        en_iyi_ix = 1 if len(yukler) > 1 else 0
-        en_iyi_isaret = 1 if yukler[en_iyi_ix][hedef_ix] > 0 else -1
+        # Uygun bilesen yok: en cok varyansli ikinci bilesene dus, yonu hedefe gore ayarla
+        yedek = 1 if len(yukler) > 1 else 0
+        return yedek, (1 if yukler[yedek][hedef_ix] > 0 else -1), abs(yukler[yedek][hedef_ix])
 
-    return en_iyi_ix, en_iyi_isaret
+    return en_iyi_ix, en_iyi_isaret, en_iyi_yuk
 
 
 def bolgesel_normalize(goruntu, bolge, maske):
@@ -247,15 +280,15 @@ def analiz_v3(koordinatlar, hassasiyet='orta', yerlesim_maskesi=True):
         gecerliMaske = gecerliMaske.And(ortu.neq(50))
 
     # --- CROSTA: kil ve demir bilesenlerini AYRI AYRI cikar ---
-    kil_pc_img, kil_yukler = temel_bilesenler(medyan, KIL_BANTLARI, bolge, gecerliMaske)
-    # Kil: SWIR1 (B11, indeks 3) parlak; NIR (B8A, indeks 2) karanlik
-    kil_ix, kil_isaret = crosta_bileseni_sec(kil_yukler, hedef_ix=3, karsit_ix=2)
-    kil_ham = kil_pc_img.select(kil_ix).multiply(kil_isaret).rename('kil')
+    kil_pc, kil_yukler, kil_ozd = temel_bilesenler(medyan, KIL_BANTLARI, bolge, gecerliMaske)
+    kil_ix, kil_isaret, kil_guven = crosta_bileseni_sec(
+        kil_ozd, kil_yukler, KIL_HEDEF, KIL_KARSIT)
+    kil_ham = kil_pc.select(kil_ix).multiply(kil_isaret).rename('kil')
 
-    demir_pc_img, demir_yukler = temel_bilesenler(medyan, DEMIR_BANTLARI, bolge, gecerliMaske)
-    # Demir oksit: kirmizi (B4, indeks 1) parlak; mavi (B2, indeks 0) karanlik
-    demir_ix, demir_isaret = crosta_bileseni_sec(demir_yukler, hedef_ix=1, karsit_ix=0)
-    demir_ham = demir_pc_img.select(demir_ix).multiply(demir_isaret).rename('demir')
+    demir_pc, demir_yukler, demir_ozd = temel_bilesenler(medyan, DEMIR_BANTLARI, bolge, gecerliMaske)
+    demir_ix, demir_isaret, demir_guven = crosta_bileseni_sec(
+        demir_ozd, demir_yukler, DEMIR_HEDEF, DEMIR_KARSIT)
+    demir_ham = demir_pc.select(demir_ix).multiply(demir_isaret).rename('demir')
 
     kil = bolgesel_normalize(kil_ham, bolge, gecerliMaske).rename('kil')
     demir = bolgesel_normalize(demir_ham, bolge, gecerliMaske).rename('demir')
@@ -370,8 +403,13 @@ def analiz_v3(koordinatlar, hassasiyet='orta', yerlesim_maskesi=True):
         'crosta': {
             'kil_bileseni': f'PC{kil_ix + 1}',
             'demir_bileseni': f'PC{demir_ix + 1}',
-            'kil_yon': kil_isaret,
-            'demir_yon': demir_isaret,
+            'kil_varyans': round(kil_ozd[kil_ix] / (sum(kil_ozd) or 1), 3),
+            'demir_varyans': round(demir_ozd[demir_ix] / (sum(demir_ozd) or 1), 3),
+            'kil_guven': round(kil_guven, 3),
+            'demir_guven': round(demir_guven, 3),
+            # Hedef band yuku zayifsa bilesen secimi supheli demektir;
+            # kullanici sonuca ona gore baksin.
+            'supheli': bool(kil_guven < 0.3 or demir_guven < 0.3),
         },
     }
 
