@@ -13,6 +13,7 @@ import KatmanKontrol, { VARSAYILAN_FILTRE } from './KatmanKontrol';
 import AramaIsareti from './AramaIsareti';
 import TarihceKatmani from './TarihceKatmani';
 import AnalizV3 from './AnalizV3';
+import BilesikRapor from './BilesikRapor';
 import AracCubugu from './AracCubugu';
 import { RENKLER, ETIKETLER, ONERILER, MINERAL_ETIKETLERI } from './siniflar';
 
@@ -238,6 +239,13 @@ function AnaUygulama({ oturum, rol }) {
   // "Taramayı Başlat" sonrası v2 ve v3'ü de otomatik çalıştırmak için sayaç
   const [tumMotorlar, setTumMotorlar] = useState(true);
   const [zincirTetik, setZincirTetik] = useState(0);
+  // Üç motorun durumu — Bileşik Rapor bunu okur
+  const [motorDurum, setMotorDurum] = useState({});
+  const motorDurumBildir = useCallback((motor, bilgi) => {
+    setMotorDurum((o) => ({ ...o, [motor]: bilgi }));
+  }, []);
+  const v2Durum = useCallback((b) => motorDurumBildir('v2', b), [motorDurumBildir]);
+  const v3Durum = useCallback((b) => motorDurumBildir('v3', b), [motorDurumBildir]);
   const [sonucGorunur, setSonucGorunur] = useState(true);
   const [odaklanilacakAlan, setOdaklanilacakAlan] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
@@ -285,7 +293,13 @@ function AnaUygulama({ oturum, rol }) {
       .from('favori_konumlar')
       .select('id, isim, lat, lng, created_at')
       .order('created_at', { ascending: false });
-    if (!error) setFavoriler(data);
+    // Hata sessizce yutulursa "favorilerim kayboldu" gibi görünüyor.
+    // Sebebi görebilmek için ekrana yazıyoruz.
+    if (error) {
+      setHata('Kayıtlı konumlar okunamadı: ' + error.message);
+      return;
+    }
+    setFavoriler(data || []);
   }, []);
 
   useEffect(() => {
@@ -458,6 +472,8 @@ function AnaUygulama({ oturum, rol }) {
     setHata(null);
     setSonuc(null);
     setAsama('uyduGeliyor');
+    motorDurumBildir('v1', { durum: 'calisiyor' });
+    setMotorDurum((o) => ({ ...o, v2: undefined, v3: undefined }));
 
     try {
       const konumAdi = await konumAdiniBul(ciziliAlan);
@@ -511,6 +527,7 @@ function AnaUygulama({ oturum, rol }) {
       }
 
       setSonuc(cevap.sonuc);
+      motorDurumBildir('v1', { durum: 'tamam', ozellikler: cevap.sonuc?.features || [] });
       setSonKullanilanTarihler(cevap.kullanilan_tarihler || null);
       setAsama('tamamlandı');
       gecmisiYukle();
@@ -520,6 +537,7 @@ function AnaUygulama({ oturum, rol }) {
     } catch (e) {
       console.error(e);
       setHata(e.message || String(e));
+      motorDurumBildir('v1', { durum: 'hata', mesaj: e.message || String(e) });
     } finally {
       setYukleniyor(false);
       setAsama('boşta');
@@ -906,12 +924,13 @@ function AnaUygulama({ oturum, rol }) {
             <CizimAraci onAlanCizildi={alanCizildi} />
             {sonuc && sonucGorunur && katmanFiltre.v1 && <GeoJSON key={JSON.stringify(sonuc).length + '-' + katmanFiltre.siniflar.join('')} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} filter={(f) => katmanFiltre.siniflar.includes(Number(f.properties.sinif))} />}
             <ManyetikKatman ciziliAlan={ciziliAlan} optikSonuc={sonuc} taramaId={null} acik={acikPanel === 'manyetik'} onKapat={() => setAcikPanel(null)} />
-            <AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} filtre={katmanFiltre} taramaId={aktifTaramaId} disSonuc={v2Sonuc} tetikleyici={zincirTetik} acik={acikPanel === 'v2'} onKapat={() => setAcikPanel(null)} />
+            <AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} filtre={katmanFiltre} taramaId={aktifTaramaId} disSonuc={v2Sonuc} tetikleyici={zincirTetik} onDurum={v2Durum} acik={acikPanel === 'v2'} onKapat={() => setAcikPanel(null)} />
             <AramaIsareti nokta={aramaIsareti} onTemizle={() => setAramaIsareti(null)} />
             <TarihceKatmani ciziliAlan={ciziliAlan} taramaId={aktifTaramaId} konumAdi={aktifKonumAdi} disTarihce={tarihce} acik={acikPanel === 'tarihce'} onKapat={() => setAcikPanel(null)} />
             <KatmanKontrol deger={katmanFiltre} onChange={setKatmanFiltre} acik={acikPanel === 'katman'} onKapat={() => setAcikPanel(null)} />
-            <AnalizV3 ciziliAlan={ciziliAlan} filtre={katmanFiltre} tetikleyici={zincirTetik} acik={acikPanel === 'v3'} onKapat={() => setAcikPanel(null)} />
-            <AracCubugu acik={acikPanel} onDegis={setAcikPanel} />
+            <AnalizV3 ciziliAlan={ciziliAlan} filtre={katmanFiltre} tetikleyici={zincirTetik} onDurum={v3Durum} acik={acikPanel === 'v3'} onKapat={() => setAcikPanel(null)} />
+            <BilesikRapor durumlar={motorDurum} acik={acikPanel === 'rapor'} onKapat={() => setAcikPanel(null)} />
+            <AracCubugu acik={acikPanel} onDegis={setAcikPanel} durumlar={motorDurum} />
             <GuvenlikKatmani rol={rol} />
           </MapContainer>
 

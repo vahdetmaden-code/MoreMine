@@ -60,6 +60,7 @@ export default function AnalizV2({
   taramaId = null,        // v2 sonucu BU taramanın içine yazılır, ayrı kayıt açılmaz
   disSonuc = null,        // geçmişten yüklenen v2 GeoJSON'u
   tetikleyici = 0,        // App.jsx artırınca analiz kendiliğinden başlar
+  onDurum = null,         // {durum, poligon, ...} — Bileşik Rapor için
   acik = false,           // panelin açık olup olmadığını AraçÇubugu belirler
   onKapat = null,
 }) {
@@ -81,6 +82,7 @@ export default function AnalizV2({
     }
     setYukleniyor(true);
     setHata(null);
+    if (onDurum) onDurum({ durum: 'calisiyor' });
     setKayitNotu(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -125,6 +127,14 @@ export default function AnalizV2({
       }
       if (!gelen.basarili) throw new Error(gelen.hata || 'Bilinmeyen hata');
       setSonuc(gelen);
+      if (onDurum) onDurum({
+        durum: 'tamam',
+        ozellikler: gelen.sonuc?.features || [],
+        esikler: gelen.esikler,
+        anomali_piksel: gelen.anomali_piksel,
+        gecerli_piksel: gelen.gecerli_piksel,
+        goruntu_sayisi: gelen.goruntu_sayisi,
+      });
 
       /*
        * KAYIT — ayrı bir tarama satırı AÇMIYORUZ.
@@ -160,10 +170,11 @@ export default function AnalizV2({
     } catch (e) {
       setHata(e.message);
       setSonuc(null);
+      if (onDurum) onDurum({ durum: 'hata', mesaj: e.message });
     } finally {
       setYukleniyor(false);
     }
-  }, [ciziliAlan, alanHazir, mineral, yerlesimMaskesi, hassasiyet, taramaId, onKaydedildi]);
+  }, [ciziliAlan, alanHazir, mineral, yerlesimMaskesi, hassasiyet, taramaId, onKaydedildi, onDurum]);
 
   /*
    * OTOMATİK TETİKLEME

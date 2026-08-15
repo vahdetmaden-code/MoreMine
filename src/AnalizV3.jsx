@@ -58,7 +58,7 @@ function v3Bilgi(feature, layer) {
   );
 }
 
-export default function AnalizV3({ ciziliAlan, filtre = null, tetikleyici = 0, acik = false, onKapat }) {
+export default function AnalizV3({ ciziliAlan, filtre = null, tetikleyici = 0, onDurum = null, acik = false, onKapat }) {
   const [hassasiyet, setHassasiyet] = useState('orta');
   const [yerlesimMaskesi, setYerlesimMaskesi] = useState(true);
   const [gorunur, setGorunur] = useState(true);
@@ -75,6 +75,7 @@ export default function AnalizV3({ ciziliAlan, filtre = null, tetikleyici = 0, a
     }
     setYukleniyor(true);
     setHata(null);
+    if (onDurum) onDurum({ durum: 'calisiyor' });
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Oturum bulunamadı.');
@@ -105,13 +106,21 @@ export default function AnalizV3({ ciziliAlan, filtre = null, tetikleyici = 0, a
       }
       if (!gelen.basarili) throw new Error(gelen.hata || 'Bilinmeyen hata');
       setSonuc(gelen);
+      if (onDurum) onDurum({
+        durum: 'tamam',
+        ozellikler: gelen.sonuc?.features || [],
+        ayrim: gelen.ayrim,
+        crosta: gelen.crosta,
+        esikler: gelen.esikler,
+      });
     } catch (e) {
       setHata(e.message);
       setSonuc(null);
+      if (onDurum) onDurum({ durum: 'hata', mesaj: e.message });
     } finally {
       setYukleniyor(false);
     }
-  }, [ciziliAlan, alanHazir, hassasiyet, yerlesimMaskesi]);
+  }, [ciziliAlan, alanHazir, hassasiyet, yerlesimMaskesi, onDurum]);
 
   /*
    * OTOMATİK TETİKLEME
