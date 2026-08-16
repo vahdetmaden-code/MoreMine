@@ -232,6 +232,7 @@ function AnaUygulama({ oturum, rol }) {
   const [katmanFiltre, setKatmanFiltre] = useState(VARSAYILAN_FILTRE);
   const [aktifTaramaId, setAktifTaramaId] = useState(null);
   const [v2Sonuc, setV2Sonuc] = useState(null);
+  const [v3Sonuc, setV3Sonuc] = useState(null);
   const [tarihce, setTarihce] = useState(null);
   const [aktifKonumAdi, setAktifKonumAdi] = useState(null);
   // Aynı anda yalnızca bir panel açık olsun (üst üste binmeyi önler)
@@ -267,6 +268,7 @@ function AnaUygulama({ oturum, rol }) {
   const [ucusHedefi, setUcusHedefi] = useState(null);
   const [favoriler, setFavoriler] = useState([]);
   const [gizlenenleriGoster, setGizlenenleriGoster] = useState(false);
+  const [sadeceFavoriler, setSadeceFavoriler] = useState(false);
   const merkezRef = useRef(null);
   const [adminPaneliAcik, setAdminPaneliAcik] = useState(false);
   const [gorunum3D, setGorunum3D] = useState(false);
@@ -282,7 +284,7 @@ function AnaUygulama({ oturum, rol }) {
   const gecmisiYukle = useCallback(async () => {
     const { data, error } = await supabase
       .from('taramalar')
-      .select('id, created_at, durum, koordinatlar, konum_adi, gizli, hedef_mineral')
+      .select('id, created_at, durum, koordinatlar, konum_adi, gizli, hedef_mineral, favori, sonuc_v2, sonuc_v3')
       .order('created_at', { ascending: false })
       .limit(50);
     if (!error) setGecmis(data);
@@ -411,6 +413,17 @@ function AnaUygulama({ oturum, rol }) {
     setFavoriler((liste) => liste.filter((f) => f.id !== id));
   };
 
+  const taramaFavoriDegistir = async (id, yeniDeger, e) => {
+    e.stopPropagation();
+    // Önce ekranda güncelle, sonra kaydet: buton anında tepki versin
+    setGecmis((liste) => liste.map((t) => (t.id === id ? { ...t, favori: yeniDeger } : t)));
+    const { error } = await supabase.from('taramalar').update({ favori: yeniDeger }).eq('id', id);
+    if (error) {
+      setHata('Favori işlemi başarısız: ' + error.message);
+      setGecmis((liste) => liste.map((t) => (t.id === id ? { ...t, favori: !yeniDeger } : t)));
+    }
+  };
+
   const gizlemeDegistir = async (id, yeniDeger, e) => {
     e.stopPropagation();
     const { error } = await supabase.from('taramalar').update({ gizli: yeniDeger }).eq('id', id);
@@ -494,6 +507,7 @@ function AnaUygulama({ oturum, rol }) {
       // v2 bu taramanın içine yazacak; önceki taramanın v2 sonucunu temizle
       setAktifTaramaId(kayit.id);
       setV2Sonuc(null);
+      setV3Sonuc(null);
       setTarihce(null);
       setAktifKonumAdi(konumAdi);
 
@@ -559,11 +573,12 @@ function AnaUygulama({ oturum, rol }) {
     setHata(null);
     setSonuc(null);
     setV2Sonuc(null);
+    setV3Sonuc(null);
     setTarihce(null);
     setAktifTaramaId(id);
     const { data, error } = await supabase
       .from('taramalar')
-      .select('sonuc, sonuc_v2, durum, hata_mesaji, koordinatlar, konum_adi')
+      .select('sonuc, sonuc_v2, sonuc_v3, durum, hata_mesaji, koordinatlar, konum_adi')
       .eq('id', id)
       .single();
 
@@ -577,6 +592,9 @@ function AnaUygulama({ oturum, rol }) {
     // v2 sonucu varsa onu da geri yükle — tek tarama, iki katman
     if (data.sonuc_v2) {
       setV2Sonuc(data.sonuc_v2);
+    }
+    if (data.sonuc_v3) {
+      setV3Sonuc(data.sonuc_v3);
     }
     setAktifKonumAdi(data.konum_adi || null);
 
@@ -861,6 +879,19 @@ function AnaUygulama({ oturum, rol }) {
           <div style={{ marginTop: '20px', borderTop: '1px solid #334155', paddingTop: '15px', flex: 1 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <h3 style={{ fontSize: '14px', margin: 0 }}>Geçmiş Taramalar</h3>
+              <button
+                onClick={() => setSadeceFavoriler((v) => !v)}
+                title={sadeceFavoriler ? 'Tümünü göster' : 'Sadece favorileri göster'}
+                style={{
+                  background: sadeceFavoriler ? '#78350f' : 'transparent',
+                  border: `1px solid ${sadeceFavoriler ? '#f59e0b' : '#334155'}`,
+                  borderRadius: '6px', padding: '3px 9px', cursor: 'pointer',
+                  color: sadeceFavoriler ? '#fde68a' : '#64748b', fontSize: '11px',
+                  marginLeft: 'auto', marginRight: '6px',
+                }}
+              >
+                ⭐ {sadeceFavoriler ? 'Favoriler' : 'Tümü'}
+              </button>
               {rol === 'admin' && (
                 <label style={{ fontSize: '10px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
                   <input type="checkbox" checked={gizlenenleriGoster} onChange={(e) => setGizlenenleriGoster(e.target.checked)} />
@@ -868,11 +899,14 @@ function AnaUygulama({ oturum, rol }) {
                 </label>
               )}
             </div>
-            {gecmis.filter((t) => rol === 'admin' && gizlenenleriGoster ? true : !t.gizli).length === 0 && (
-              <div style={{ fontSize: '12px', color: '#64748b' }}>Henüz tarama yok.</div>
+            {gecmis.filter((t) => (rol === 'admin' && gizlenenleriGoster ? true : !t.gizli) && (!sadeceFavoriler || t.favori)).length === 0 && (
+              <div style={{ fontSize: '12px', color: '#64748b' }}>
+                {sadeceFavoriler ? 'Favori tarama yok. Listedeki yıldıza basarak ekleyebilirsin.' : 'Henüz tarama yok.'}
+              </div>
             )}
             {gecmis
               .filter((t) => (rol === 'admin' && gizlenenleriGoster ? true : !t.gizli))
+              .filter((t) => !sadeceFavoriler || t.favori)
               .map((t) => (
               <div
                 key={t.id}
@@ -884,13 +918,40 @@ function AnaUygulama({ oturum, rol }) {
                     {t.konum_adi || 'Konum bulunamadı'} {t.gizli && '(gizli)'}
                   </div>
                   <div style={{ color: '#64748b', fontSize: '10px' }}>{MINERAL_ETIKETLERI[t.hedef_mineral] || 'Altın'}</div>
+                  <div style={{ display: 'flex', gap: '4px', marginTop: '2px' }}>
+                    {[
+                      { ad: 'v1', var: true, renk: '#3b82f6' },
+                      { ad: 'v2', var: !!t.sonuc_v2, renk: '#0891b2' },
+                      { ad: 'v3', var: !!t.sonuc_v3, renk: '#059669' },
+                    ].map((m) => (
+                      <span key={m.ad} style={{
+                        fontSize: '9px', padding: '1px 5px', borderRadius: '4px',
+                        background: m.var ? m.renk : 'transparent',
+                        border: `1px solid ${m.var ? m.renk : '#334155'}`,
+                        color: m.var ? '#fff' : '#475569',
+                      }}>{m.ad}</span>
+                    ))}
+                  </div>
                   <div style={{ color: '#64748b', fontSize: '11px' }}>{new Date(t.created_at).toLocaleString('tr-TR')}</div>
                   <div style={{ color: t.durum === 'Tamamlandı' ? '#4ade80' : t.durum === 'Hata' ? '#f87171' : '#fbbf24' }}>
                     {t.durum}
                   </div>
                 </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flexShrink: 0, alignItems: 'center' }}>
+                  <button
+                    onClick={(e) => taramaFavoriDegistir(t.id, !t.favori, e)}
+                    title={t.favori ? 'Favorilerden çıkar' : 'Favorilere ekle'}
+                    style={{
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      fontSize: '15px', padding: '2px 4px', lineHeight: 1,
+                      filter: t.favori ? 'none' : 'grayscale(1)',
+                      opacity: t.favori ? 1 : 0.45,
+                    }}
+                  >
+                    ⭐
+                  </button>
                 {rol === 'admin' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flexShrink: 0 }}>
+                  <>
                     <button
                       onClick={(e) => gizlemeDegistir(t.id, !t.gizli, e)}
                       title={t.gizli ? 'Göster' : 'Gizle'}
@@ -905,8 +966,9 @@ function AnaUygulama({ oturum, rol }) {
                     >
                       🗑
                     </button>
-                  </div>
+                  </>
                 )}
+                </div>
               </div>
             ))}
           </div>
@@ -928,7 +990,7 @@ function AnaUygulama({ oturum, rol }) {
             <AramaIsareti nokta={aramaIsareti} onTemizle={() => setAramaIsareti(null)} />
             <TarihceKatmani ciziliAlan={ciziliAlan} taramaId={aktifTaramaId} konumAdi={aktifKonumAdi} disTarihce={tarihce} acik={acikPanel === 'tarihce'} onKapat={() => setAcikPanel(null)} />
             <KatmanKontrol deger={katmanFiltre} onChange={setKatmanFiltre} acik={acikPanel === 'katman'} onKapat={() => setAcikPanel(null)} />
-            <AnalizV3 ciziliAlan={ciziliAlan} filtre={katmanFiltre} tetikleyici={zincirTetik} onDurum={v3Durum} acik={acikPanel === 'v3'} onKapat={() => setAcikPanel(null)} />
+            <AnalizV3 ciziliAlan={ciziliAlan} filtre={katmanFiltre} tetikleyici={zincirTetik} onDurum={v3Durum} taramaId={aktifTaramaId} disSonuc={v3Sonuc} onKaydedildi={gecmisiYukle} acik={acikPanel === 'v3'} onKapat={() => setAcikPanel(null)} />
             <BilesikRapor durumlar={motorDurum} acik={acikPanel === 'rapor'} onKapat={() => setAcikPanel(null)} />
             <AracCubugu acik={acikPanel} onDegis={setAcikPanel} durumlar={motorDurum} />
             <GuvenlikKatmani rol={rol} />

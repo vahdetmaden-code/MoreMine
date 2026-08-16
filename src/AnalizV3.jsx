@@ -58,13 +58,24 @@ function v3Bilgi(feature, layer) {
   );
 }
 
-export default function AnalizV3({ ciziliAlan, filtre = null, tetikleyici = 0, onDurum = null, acik = false, onKapat }) {
+export default function AnalizV3({
+  ciziliAlan,
+  filtre = null,
+  tetikleyici = 0,
+  onDurum = null,
+  taramaId = null,        // sonuç BU taramanın sonuc_v3 sütununa yazılır
+  disSonuc = null,        // geçmişten yüklenen v3 GeoJSON'u
+  onKaydedildi = null,
+  acik = false,
+  onKapat,
+}) {
   const [hassasiyet, setHassasiyet] = useState('orta');
   const [yerlesimMaskesi, setYerlesimMaskesi] = useState(true);
   const [gorunur, setGorunur] = useState(true);
   const [sonuc, setSonuc] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [hata, setHata] = useState(null);
+  const [kayitNotu, setKayitNotu] = useState(null);
 
   const alanHazir = Array.isArray(ciziliAlan) && ciziliAlan.length >= 3;
 
@@ -75,6 +86,7 @@ export default function AnalizV3({ ciziliAlan, filtre = null, tetikleyici = 0, o
     }
     setYukleniyor(true);
     setHata(null);
+    setKayitNotu(null);
     if (onDurum) onDurum({ durum: 'calisiyor' });
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -113,6 +125,26 @@ export default function AnalizV3({ ciziliAlan, filtre = null, tetikleyici = 0, o
         crosta: gelen.crosta,
         esikler: gelen.esikler,
       });
+
+      /*
+       * Sonucu mevcut taramanın sonuc_v3 sütununa yaz.
+       * Ayrı tarama kaydı AÇILMAZ — tek tarama, üç sonuç (sonuc / sonuc_v2 / sonuc_v3).
+       */
+      if (!taramaId) {
+        setKayitNotu('Sonuç ekranda, ancak kaydedilmedi: önce normal (v1) taramayı çalıştır.');
+      } else {
+        const { error: kayitHatasi } = await supabase
+          .from('taramalar')
+          .update({ sonuc_v3: gelen.sonuc })
+          .eq('id', taramaId);
+        if (kayitHatasi) {
+          setKayitNotu('Analiz tamam, kaydedilemedi: ' + kayitHatasi.message);
+        } else {
+          setKayitNotu('Bu taramaya kaydedildi.');
+          if (onKaydedildi) onKaydedildi();
+          setTimeout(() => setKayitNotu(null), 4000);
+        }
+      }
     } catch (e) {
       setHata(e.message);
       setSonuc(null);
@@ -120,7 +152,7 @@ export default function AnalizV3({ ciziliAlan, filtre = null, tetikleyici = 0, o
     } finally {
       setYukleniyor(false);
     }
-  }, [ciziliAlan, alanHazir, hassasiyet, yerlesimMaskesi, onDurum]);
+  }, [ciziliAlan, alanHazir, hassasiyet, yerlesimMaskesi, onDurum, taramaId, onKaydedildi]);
 
   /*
    * OTOMATİK TETİKLEME
@@ -135,7 +167,7 @@ export default function AnalizV3({ ciziliAlan, filtre = null, tetikleyici = 0, o
   }, [tetikleyici]);
 
   const temizSonuc = (() => {
-    const ham = sonuc?.sonuc;
+    const ham = sonuc?.sonuc || disSonuc;
     if (!ham?.features) return null;
     const noktaGecerli = (n) =>
       Array.isArray(n) && n.length >= 2
@@ -255,7 +287,17 @@ export default function AnalizV3({ ciziliAlan, filtre = null, tetikleyici = 0, o
             </div>
           )}
 
-          {sonuc && (
+          {kayitNotu && (
+            <div style={{
+              background: kayitNotu.startsWith('Bu taramaya') ? '#14532d' : '#78350f',
+              padding: 8, borderRadius: 6, marginBottom: 10,
+              fontSize: 11.5, lineHeight: 1.5,
+            }}>
+              {kayitNotu}
+            </div>
+          )}
+
+          {(sonuc || disSonuc) && (
             <>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 10 }}>
                 <input
