@@ -174,6 +174,11 @@ export default function BilesikRapor({ durumlar, acik, onKapat }) {
         return (
           <div style={{ borderTop: '1px solid #334155', paddingTop: 10, marginBottom: 10 }}>
             <b style={{ fontSize: 12, color: '#cbd5e1' }}>Mineral dağılımı</b>
+            {a.demir_esigi != null && (
+              <div style={{ color: '#64748b', fontSize: 10.5, marginTop: 2 }}>
+                Eşik bölgesel medyandan: demir {a.demir_esigi} · kil {a.kil_esigi}
+              </div>
+            )}
             <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', margin: '7px 0' }}>
               <div style={{ width: `${(a.demir_ve_kil / t) * 100}%`, background: '#22c55e' }} />
               <div style={{ width: `${(a.sadece_demir / t) * 100}%`, background: '#dc2626' }} />

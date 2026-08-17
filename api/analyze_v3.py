@@ -327,7 +327,23 @@ def analiz_v3(koordinatlar, hassasiyet='orta', yerlesim_maskesi=True):
     # --- AYRIM TESHISI: v3'un asil cevabi ---
     # "Demir var ama kil yok" olan pikseller v1/v2'de anomali cikardi,
     # v3'te elenmeli. Bu sayilar tam olarak bunu olcuyor.
-    AYRIM_ESIK = 0.6
+    #
+    # ESIK SABIT DEGIL, BOLGESEL MEDYAN.
+    # Onceki surumde sabit 0.6 kullaniyordum; alanin genel seviyesi 0.55
+    # civarindaysa her sey "hicbiri" kovasina dusuyor ve tablo bos/yaniltici
+    # cikiyordu. Ayni tutarsizlik arayuzde de vardi: sinif bolgesel
+    # siralamadan gelirken yorum sabit esige bakiyordu.
+    medyanlar = demir.rename('d').addBands(kil.rename('k')) \
+        .updateMask(gecerliMaske).reduceRegion(
+            reducer=ee.Reducer.median(), geometry=bolge,
+            crs=ORTAK_CRS, scale=BOLGESEL_OLCEK,
+            maxPixels=1e10, bestEffort=True, tileScale=4,
+        ).getInfo()
+
+    demir_esik = medyanlar.get('d')
+    kil_esik = medyanlar.get('k')
+    demir_esik = 0.5 if demir_esik is None else float(demir_esik)
+    kil_esik = 0.5 if kil_esik is None else float(kil_esik)
 
     def piksel_say(maske_img):
         sonuc = maske_img.selfMask().rename('n').reduceRegion(
@@ -337,14 +353,16 @@ def analiz_v3(koordinatlar, hassasiyet='orta', yerlesim_maskesi=True):
         ).getInfo()
         return sonuc.get('n') or 0
 
-    demir_yuksek = demir.gt(AYRIM_ESIK).And(gecerliMaske)
-    kil_yuksek = kil.gt(AYRIM_ESIK).And(gecerliMaske)
+    demir_yuksek = demir.gt(demir_esik).And(gecerliMaske)
+    kil_yuksek = kil.gt(kil_esik).And(gecerliMaske)
 
     ayrim = {
         'gecerli_zemin': piksel_say(gecerliMaske),
-        'demir_ve_kil': piksel_say(demir_yuksek.And(kil_yuksek)),      # altin adayi
+        'demir_ve_kil': piksel_say(demir_yuksek.And(kil_yuksek)),        # altin adayi
         'sadece_demir': piksel_say(demir_yuksek.And(kil_yuksek.Not())),  # elenen
         'sadece_kil': piksel_say(kil_yuksek.And(demir_yuksek.Not())),
+        'demir_esigi': round(demir_esik, 3),
+        'kil_esigi': round(kil_esik, 3),
     }
 
     # --- Siniflandirma ---

@@ -36,25 +36,50 @@ function v3Bilgi(feature, layer) {
   const demir = p.demir ?? 0;
   const kil = p.kil ?? 0;
 
-  // Poligonun neden bu skoru aldığını tek cümleyle açıkla
+  /*
+   * YORUM MANTIGI — DENGEYE bakar, mutlak yuksekliğe DEĞİL.
+   *
+   * Önceki sürümde sabit 0.6 eşiği kullanıyordum ve şöyle bir çelişki
+   * çıkıyordu: sınıf "Çok Güçlü Etki" (bölgesel sıralamada en üst dilim)
+   * ama yorum "her iki bileşen de zayıf" (0.6 eşiğinin altında).
+   *
+   * İkisi farklı ölçek:
+   *   - SINIF     → bölgesel sıralama (bu bölgede ne kadar sıra dışı)
+   *   - YÜZDELER  → mutlak normalize değer (0-1 arası ham güç)
+   *
+   * Zaten aradığımız şey mutlak yükseklik değil, demirin ve kilin
+   * BİRLİKTE bulunmasıydı. Dolayısıyla yorum dengeye bakmalı:
+   * %55 demir + %56 kil, %90 demir + %10 kil'den çok daha anlamlıdır.
+   */
+  const buyuk = Math.max(demir, kil);
+  const kucuk = Math.min(demir, kil);
+  const denge = buyuk > 0 ? kucuk / buyuk : 0;
+
   let yorum;
-  if (demir >= 0.6 && kil >= 0.6) {
-    yorum = 'Demir + kil birlikte — altın sistemi için beklenen imza.';
-  } else if (demir >= 0.6) {
-    yorum = 'Demir var, kil yok — demir/toprak/alüvyon olabilir.';
-  } else if (kil >= 0.6) {
-    yorum = 'Kil var, demir yok — alterasyonla ilgisiz killeşme olabilir.';
+  let yorumRenk;
+  if (denge >= 0.7) {
+    yorum = 'Demir ve kil dengeli — alterasyon için beklenen birliktelik.';
+    yorumRenk = '#166534';
+  } else if (denge >= 0.45) {
+    yorum = demir > kil
+      ? 'Demir bir miktar baskın; kil yine de mevcut.'
+      : 'Kil bir miktar baskın; demir yine de mevcut.';
+    yorumRenk = '#854d0e';
+  } else if (demir > kil) {
+    yorum = 'Demir baskın, kil çok geride — demir/toprak/alüvyon ihtimali yüksek.';
+    yorumRenk = '#7f1d1d';
   } else {
-    yorum = 'Her iki bileşen de zayıf.';
+    yorum = 'Kil baskın, demir çok geride — alterasyonla ilgisiz killeşme olabilir.';
+    yorumRenk = '#7f1d1d';
   }
 
   layer.bindTooltip(
     `<b>v3 — ${SINIF_AD[p.sinif] || p.sinif}</b><br/>` +
-    `Skor: ${(p.skor || 0).toFixed(3)}<br/>` +
+    `<span style="color:#475569;font-size:11px">Sınıf, bölgesel sıralamadan gelir</span><br/>` +
     `Demir oksit: ${(demir * 100).toFixed(0)}%<br/>` +
     `Kil (hidroksil): ${(kil * 100).toFixed(0)}%<br/>` +
-    `Birliktelik: ${((p.birliktelik ?? 0) * 100).toFixed(0)}%<br/>` +
-    `<i>${yorum}</i>`
+    `<b>Denge: ${(denge * 100).toFixed(0)}%</b><br/>` +
+    `<span style="color:${yorumRenk}"><i>${yorum}</i></span>`
   );
 }
 
