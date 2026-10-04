@@ -18,6 +18,7 @@ import { useState } from 'react';
 
 export const PANELLER = [
   { id: 'rapor', ikon: '📊', ad: 'Rapor', renk: '#1d4ed8' },
+  { id: 'v4', ikon: '◎', ad: 'Derin Tarama', renk: '#0e7490' },
   { id: 'katman', ikon: '🎚️', ad: 'Katmanlar', renk: '#334155' },
   { id: 'v2', ikon: '🔬', ad: 'v2 Analiz', renk: '#0891b2' },
   { id: 'v3', ikon: '⚗️', ad: 'v3 Mineral', renk: '#059669' },

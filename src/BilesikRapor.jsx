@@ -17,6 +17,7 @@ const MOTOR_BILGI = {
   v1: { ad: 'v1 — Geniş Tarama', renk: '#3b82f6', not: 'Ham spektral anomali' },
   v2: { ad: 'v2 — Kararlı Anomali', renk: '#0891b2', not: 'Zamanla ısrarla çıkanlar' },
   v3: { ad: 'v3 — Mineral Ayrımı', renk: '#059669', not: 'Demir–kil birlikteliği' },
+  v4: { ad: 'v4 — Derin Tarama', renk: '#0e7490', not: 'Birliktelik + kararlılık birlikte' },
 };
 
 const DURUM_ETIKET = {
@@ -51,7 +52,7 @@ export default function BilesikRapor({ durumlar, acik, onKapat }) {
   if (!acik) return null;
 
   const d = durumlar || {};
-  const motorlar = ['v1', 'v2', 'v3'];
+  const motorlar = ['v1', 'v2', 'v3', 'v4'];
 
   // Yorum cümlesi: sayılara bakıp tek cümlelik özet üret
   const yorumla = () => {
@@ -78,8 +79,20 @@ export default function BilesikRapor({ durumlar, acik, onKapat }) {
         }
       }
     }
-    if (d.v3?.crosta?.supheli) {
-      parcalar.push('Bileşen ayrımı zayıf çıktı; v3 sonucuna temkinli yaklaş.');
+    if (d.v4?.durum === 'tamam') {
+      const v4s = d.v4.ozellikler?.length || 0;
+      if (v4s > 0) {
+        const alan = d.v4.toplam_alan_m2;
+        const alanYazi = alan >= 1e6 ? `${(alan / 1e6).toFixed(2)} km²`
+          : alan >= 1e4 ? `${(alan / 1e4).toFixed(2)} ha`
+          : `${Math.round(alan || 0).toLocaleString('tr-TR')} m²`;
+        parcalar.push(`v4, hem mineral birlikteliği hem zamansal kararlılık gösteren ${v4s} hedef buldu (toplam ${alanYazi}).`);
+      } else {
+        parcalar.push('v4 doğrulanmış hedef bulamadı — iki şartı birden geçen yer yok.');
+      }
+    }
+    if (d.v3?.crosta?.supheli || d.v4?.crosta?.supheli) {
+      parcalar.push('Bileşen ayrımı zayıf çıktı; mineral sonuçlarına temkinli yaklaş.');
     }
     return parcalar.length ? parcalar.join(' ') : null;
   };
@@ -138,7 +151,13 @@ export default function BilesikRapor({ durumlar, acik, onKapat }) {
                   <span style={{ color: '#94a3b8' }}>Poligon</span>
                   <b>{toplam}</b>
                 </div>
-                {toplamAlan(ozellikler) > 0 && (
+                {m === 'v4' && d.v4?.toplam_alan_m2 > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5 }}>
+                    <span style={{ color: '#94a3b8' }}>Doğrulanmış alan</span>
+                    <b style={{ color: '#67e8f9' }}>{alanYazi(d.v4.toplam_alan_m2)}</b>
+                  </div>
+                )}
+                {m !== 'v4' && toplamAlan(ozellikler) > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5 }}>
                     <span style={{ color: '#94a3b8' }}>Toplam alan</span>
                     <b>{alanYazi(toplamAlan(ozellikler))}</b>

@@ -13,6 +13,7 @@ import KatmanKontrol, { VARSAYILAN_FILTRE } from './KatmanKontrol';
 import AramaIsareti from './AramaIsareti';
 import TarihceKatmani from './TarihceKatmani';
 import AnalizV3 from './AnalizV3';
+import AnalizV4 from './AnalizV4';
 import BilesikRapor from './BilesikRapor';
 import AracCubugu from './AracCubugu';
 import { RENKLER, ETIKETLER, ONERILER, MINERAL_ETIKETLERI } from './siniflar';
@@ -233,6 +234,7 @@ function AnaUygulama({ oturum, rol }) {
   const [aktifTaramaId, setAktifTaramaId] = useState(null);
   const [v2Sonuc, setV2Sonuc] = useState(null);
   const [v3Sonuc, setV3Sonuc] = useState(null);
+  const [v4Sonuc, setV4Sonuc] = useState(null);
   const [tarihce, setTarihce] = useState(null);
   const [aktifKonumAdi, setAktifKonumAdi] = useState(null);
   // Aynı anda yalnızca bir panel açık olsun (üst üste binmeyi önler)
@@ -247,6 +249,7 @@ function AnaUygulama({ oturum, rol }) {
   }, []);
   const v2Durum = useCallback((b) => motorDurumBildir('v2', b), [motorDurumBildir]);
   const v3Durum = useCallback((b) => motorDurumBildir('v3', b), [motorDurumBildir]);
+  const v4Durum = useCallback((b) => motorDurumBildir('v4', b), [motorDurumBildir]);
   const [sonucGorunur, setSonucGorunur] = useState(true);
   const [odaklanilacakAlan, setOdaklanilacakAlan] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
@@ -284,7 +287,7 @@ function AnaUygulama({ oturum, rol }) {
   const gecmisiYukle = useCallback(async () => {
     const { data, error } = await supabase
       .from('taramalar')
-      .select('id, created_at, durum, koordinatlar, konum_adi, gizli, hedef_mineral, favori, sonuc_v2, sonuc_v3')
+      .select('id, created_at, durum, koordinatlar, konum_adi, gizli, hedef_mineral, favori, sonuc_v2, sonuc_v3, sonuc_v4')
       .order('created_at', { ascending: false })
       .limit(50);
     if (!error) setGecmis(data);
@@ -508,6 +511,7 @@ function AnaUygulama({ oturum, rol }) {
       setAktifTaramaId(kayit.id);
       setV2Sonuc(null);
       setV3Sonuc(null);
+      setV4Sonuc(null);
       setTarihce(null);
       setAktifKonumAdi(konumAdi);
 
@@ -574,11 +578,12 @@ function AnaUygulama({ oturum, rol }) {
     setSonuc(null);
     setV2Sonuc(null);
     setV3Sonuc(null);
+    setV4Sonuc(null);
     setTarihce(null);
     setAktifTaramaId(id);
     const { data, error } = await supabase
       .from('taramalar')
-      .select('sonuc, sonuc_v2, sonuc_v3, durum, hata_mesaji, koordinatlar, konum_adi')
+      .select('sonuc, sonuc_v2, sonuc_v3, sonuc_v4, durum, hata_mesaji, koordinatlar, konum_adi')
       .eq('id', id)
       .single();
 
@@ -595,6 +600,9 @@ function AnaUygulama({ oturum, rol }) {
     }
     if (data.sonuc_v3) {
       setV3Sonuc(data.sonuc_v3);
+    }
+    if (data.sonuc_v4) {
+      setV4Sonuc(data.sonuc_v4);
     }
     setAktifKonumAdi(data.konum_adi || null);
 
@@ -923,6 +931,7 @@ function AnaUygulama({ oturum, rol }) {
                       { ad: 'v1', var: true, renk: '#3b82f6' },
                       { ad: 'v2', var: !!t.sonuc_v2, renk: '#0891b2' },
                       { ad: 'v3', var: !!t.sonuc_v3, renk: '#059669' },
+                      { ad: 'v4', var: !!t.sonuc_v4, renk: '#0e7490' },
                     ].map((m) => (
                       <span key={m.ad} style={{
                         fontSize: '9px', padding: '1px 5px', borderRadius: '4px',
@@ -991,6 +1000,7 @@ function AnaUygulama({ oturum, rol }) {
             <TarihceKatmani ciziliAlan={ciziliAlan} taramaId={aktifTaramaId} konumAdi={aktifKonumAdi} disTarihce={tarihce} acik={acikPanel === 'tarihce'} onKapat={() => setAcikPanel(null)} />
             <KatmanKontrol deger={katmanFiltre} onChange={setKatmanFiltre} acik={acikPanel === 'katman'} onKapat={() => setAcikPanel(null)} />
             <AnalizV3 ciziliAlan={ciziliAlan} filtre={katmanFiltre} tetikleyici={zincirTetik} onDurum={v3Durum} taramaId={aktifTaramaId} disSonuc={v3Sonuc} onKaydedildi={gecmisiYukle} acik={acikPanel === 'v3'} onKapat={() => setAcikPanel(null)} />
+            <AnalizV4 ciziliAlan={ciziliAlan} filtre={katmanFiltre} tetikleyici={zincirTetik} onDurum={v4Durum} taramaId={aktifTaramaId} disSonuc={v4Sonuc} onKaydedildi={gecmisiYukle} onHedefeGit={(n) => setUcusHedefi({ lat: n.lat, lng: n.lng, zoom: 17 })} acik={acikPanel === 'v4'} onKapat={() => setAcikPanel(null)} />
             <BilesikRapor durumlar={motorDurum} acik={acikPanel === 'rapor'} onKapat={() => setAcikPanel(null)} />
             <AracCubugu acik={acikPanel} onDegis={setAcikPanel} durumlar={motorDurum} />
             <GuvenlikKatmani rol={rol} />

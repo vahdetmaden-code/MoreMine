@@ -12,7 +12,7 @@
  *   { v1: true, v2: true, siniflar: [0, 1, 2, 3, 4] }
  */
 
-export const VARSAYILAN_FILTRE = { v1: true, v2: true, v3: true, siniflar: [0, 1, 2, 3, 4] };
+export const VARSAYILAN_FILTRE = { v1: true, v2: true, v3: true, v4: true, siniflar: [0, 1, 2, 3, 4] };
 
 const SINIFLAR = [
   { deger: 4, ad: 'Çok güçlü', renk: '#ef4444' },
@@ -79,6 +79,10 @@ export default function KatmanKontrol({ deger, onChange, acik = false, onKapat }
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
               <input type="checkbox" checked={filtre.v3 !== false} onChange={() => motorDegistir('v3')} style={{ width: 17, height: 17, flexShrink: 0 }} />
               <span>v3 <span style={{ color: '#64748b', fontSize: 11 }}>(noktalı çizgi)</span></span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, cursor: 'pointer' }}>
+              <input type="checkbox" checked={filtre.v4 !== false} onChange={() => motorDegistir('v4')} style={{ width: 17, height: 17, flexShrink: 0 }} />
+              <span>v4 <span style={{ color: '#64748b', fontSize: 11 }}>(parlayan)</span></span>
             </label>
           </div>
 
