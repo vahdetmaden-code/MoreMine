@@ -60,11 +60,63 @@ DEMIR_HEDEF, DEMIR_KARSIT = 1, 0    # B4 parlak, B2 karanlik
 
 MIN_VARYANS_PAYI = 0.02
 
-HASSASIYET_YUZDELIK = {
-    'yuksek': [70, 84, 93, 98],
-    'orta':   [85, 93, 97, 99],
-    'dusuk':  [93, 96, 98, 99],
+# =====================================================================
+# SINIF KURALLARI — MUTLAK VE OKUNABILIR
+# =====================================================================
+# ONCEKI SURUMDE yuzdelik esik kullaniyordum (bolgenin ust %1'i = Cok Guclu).
+# Iki sorunu vardi:
+#
+#   1) Sinif tek bir BIRLESIK SKORDAN geliyordu. Dengesi zayif ama
+#      kararliligi cok yuksek bir poligon "Cok Guclu" olabiliyordu;
+#      dengesi mukemmel ama kararliligi orta olan "Guclu"da kaliyordu.
+#      Haritaya bakan kisi hangi poligonun NEDEN o sinifta oldugunu
+#      anlayamiyordu.
+#
+#   2) Esikler her bolgede farkli hesaplandigi icin taramalar arasi
+#      karsilastirma bozuluyordu: A bolgesinde 0.75 skorlu poligon
+#      "Cok Guclu", B bolgesinde 0.82 skorlu poligon "Guclu" cikabiliyordu.
+#
+# SIMDI: her sinifin UC NET KOSULU var ve UCU BIRDEN saglanmali.
+# Bir poligon, tum kosullarini sagladigi EN YUKSEK sinifi alir.
+#
+#   denge      = min(demir, kil) / max(demir, kil)
+#                Iki mineralin ne kadar DENGELI oldugu. Altin sistemlerinde
+#                demir ve kil birlikte bulunur; biri digerini cok asiyorsa
+#                aluvyon veya alakasiz killesme ihtimali yuksektir.
+#
+#   kararlilik = sinyalin kac goruntude goruldugu (0-1)
+#                Gecici nem lekesi / bulut golgesi / surulmus tarla eler.
+#
+#   guc        = sqrt(demir x kil)
+#                Sinyalin mutlak siddeti. Denge yuksek ama ikisi de cok
+#                zayifsa (orn. %10 - %11) bu bir hedef degildir.
+#
+# Esikler SABIT: ayni degerler her taramada gecerli, bolgeye gore
+# kaymaz. Boylece iki farkli bolgedeki "Cok Guclu" ayni seyi ifade eder.
+SINIF_KURALLARI = {
+    # (sinif, en_az_denge, en_az_kararlilik, en_az_guc)
+    'yuksek': [                       # daha fazla sinyal, daha gevsek
+        (4, 0.72, 0.62, 0.52),
+        (3, 0.58, 0.50, 0.43),
+        (2, 0.44, 0.33, 0.34),
+        (1, 0.30, 0.20, 0.25),
+    ],
+    'orta': [                         # varsayilan
+        (4, 0.80, 0.75, 0.60),
+        (3, 0.65, 0.60, 0.50),
+        (2, 0.50, 0.40, 0.40),
+        (1, 0.35, 0.25, 0.30),
+    ],
+    'dusuk': [                        # sadece en net hedefler
+        (4, 0.86, 0.85, 0.68),
+        (3, 0.74, 0.72, 0.58),
+        (2, 0.60, 0.55, 0.48),
+        (1, 0.45, 0.38, 0.38),
+    ],
 }
+
+# Insan tarafindan okunabilir aciklama — panelde gosteriliyor
+SINIF_ADLARI = {4: 'Çok Güçlü Etki', 3: 'Güçlü Etki', 2: 'Orta Etki', 1: 'Zayıf Etki'}
 
 # Birliktelik agirligi: skorun ne kadari carpim kuralindan gelsin
 BIRLIKTELIK_AGIRLIGI = 0.7
@@ -232,7 +284,7 @@ def bolgesel_normalize(goruntu, bolge, maske):
 def analiz_v4(koordinatlar, hassasiyet='orta', yerlesim_maskesi=True):
     gee_baslat()
 
-    yuzdelikler = HASSASIYET_YUZDELIK.get(hassasiyet, HASSASIYET_YUZDELIK['orta'])
+    kurallar = SINIF_KURALLARI.get(hassasiyet, SINIF_KURALLARI['orta'])
 
     aoi = ee.Geometry.Polygon([[[k['lng'], k['lat']] for k in koordinatlar]])
     bolge = aoi.buffer(BOLGESEL_TAMPON)
@@ -336,48 +388,66 @@ def analiz_v4(koordinatlar, hassasiyet='orta', yerlesim_maskesi=True):
         .divide(goruntu_sayisi).rename('kararlilik').updateMask(gecerliMaske)
 
     # -----------------------------------------------------------------
-    # 4) BIRLESIK SKOR
+    # 4) KARAR DEGISKENLERI — her biri kendi basina okunabilir
     # -----------------------------------------------------------------
-    taban = birliktelik.multiply(BIRLIKTELIK_AGIRLIGI) \
-        .add(demir.add(kil).divide(2).multiply(1 - BIRLIKTELIK_AGIRLIGI))
+    # Siniflandirma artik tek bir birlesik skordan DEGIL, bu uc olcunun
+    # her birinin kendi esigini gecmesinden geliyor. Boylece bir poligonun
+    # neden o sinifta oldugu dogrudan okunabiliyor.
 
-    skor = taban.multiply(
-        ee.Image(KARARLILIK_TABANI).add(kararlilik.multiply(1 - KARARLILIK_TABANI))
-    ).updateMask(gecerliMaske).rename('skor')
+    # DENGE: iki mineral ne kadar denk? 1.0 = tam esit, 0 = biri tamamen yok
+    denge = demir.min(kil).divide(demir.max(kil).max(1e-6)) \
+        .clamp(0, 1).rename('denge')
 
-    skor_puruzsuz = skor.focal_median(radius=25, units='meters', kernelType='circle') \
-        .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
+    # GUC: sinyalin mutlak siddeti (geometrik ortalama).
+    # Denge yuksek ama ikisi de cok zayifsa (orn. 0.10 ve 0.11) bu hedef degil.
+    guc = birliktelik.rename('guc')
+
+    # Puruzlestirme: poligon kenarlari piksel gurultusunden temizlensin.
+    # Her uc olcu de ayni sekilde puruzlestiriliyor ki kurallar tutarli calissin.
+    def puruzlestir(img):
+        return img.focal_median(radius=25, units='meters', kernelType='circle') \
+            .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
+
+    denge_p = puruzlestir(denge)
+    guc_p = puruzlestir(guc)
+    kararlilik_p = puruzlestir(kararlilik)
+
+    # Bilgi amacli birlesik skor (siralama ve gosterim icin; SINIFI BELIRLEMEZ)
+    skor = guc.multiply(BIRLIKTELIK_AGIRLIGI) \
+        .add(demir.add(kil).divide(2).multiply(1 - BIRLIKTELIK_AGIRLIGI)) \
+        .multiply(ee.Image(KARARLILIK_TABANI).add(kararlilik.multiply(1 - KARARLILIK_TABANI))) \
+        .updateMask(gecerliMaske).rename('skor')
+    skor_puruzsuz = puruzlestir(skor)
 
     # -----------------------------------------------------------------
-    # 5) BOLGESEL ESIKLER
+    # 5) SINIFLANDIRMA — UC KOSUL BIRDEN
     # -----------------------------------------------------------------
-    bolgesel = skor.updateMask(gecerliMaske).reduceRegion(
-        reducer=ee.Reducer.percentile(yuzdelikler), geometry=bolge,
-        crs=ORTAK_CRS, scale=BOLGESEL_OLCEK,
-        maxPixels=1e10, bestEffort=True, tileScale=4,
-    ).getInfo()
+    # Dusuk siniftan yuksege dogru uygulaniyor; bir piksel, tum kosullarini
+    # sagladigi EN YUKSEK sinifi alir. Kurallar MUTLAK: bolgeye gore kaymaz,
+    # dolayisiyla iki farkli taramadaki ayni sinif ayni seyi ifade eder.
+    siniflar = ee.Image(0)
+    for sinif, en_az_denge, en_az_kararlilik, en_az_guc in sorted(kurallar, key=lambda k: k[0]):
+        kosul = denge_p.gte(en_az_denge) \
+            .And(kararlilik_p.gte(en_az_kararlilik)) \
+            .And(guc_p.gte(en_az_guc))
+        siniflar = siniflar.where(kosul, sinif)
 
-    esikler = {}
-    for sira, yuzde in enumerate(yuzdelikler, start=1):
-        deger = bolgesel.get(f'skor_p{yuzde}')
-        esikler[sira] = round(float(deger), 4) if deger is not None else None
-    if esikler.get(1) is None:
-        raise RuntimeError("Bölgesel eşik hesaplanamadı.")
-    for sira in (2, 3, 4):
-        if esikler.get(sira) is None or esikler[sira] <= esikler[sira - 1]:
-            esikler[sira] = round(esikler[sira - 1] + 0.001, 4)
-
-    siniflar = ee.Image(0) \
-        .where(skor_puruzsuz.gt(esikler[1]), 1) \
-        .where(skor_puruzsuz.gt(esikler[2]), 2) \
-        .where(skor_puruzsuz.gt(esikler[3]), 3) \
-        .where(skor_puruzsuz.gt(esikler[4]), 4) \
-        .updateMask(gecerliMaske) \
-        .updateMask(skor_puruzsuz.gt(esikler[1])) \
+    siniflar = siniflar.updateMask(gecerliMaske) \
+        .updateMask(siniflar.gt(0)) \
         .rename('sinif').toInt() \
         .reproject(crs=ORTAK_CRS, scale=ORTAK_OLCEK)
 
-    # -----------------------------------------------------------------
+    # Kurallari cikti icin okunabilir hale getir
+    esikler = {
+        str(sinif): {
+            'denge': en_az_denge,
+            'kararlilik': en_az_kararlilik,
+            'guc': en_az_guc,
+            'ad': SINIF_ADLARI.get(sinif, str(sinif)),
+        }
+        for sinif, en_az_denge, en_az_kararlilik, en_az_guc in kurallar
+    }
+
     # 6) TESHIS SAYIMLARI
     # -----------------------------------------------------------------
     medyanlar = demir.rename('d').addBands(kil.rename('k')) \
@@ -416,8 +486,9 @@ def analiz_v4(koordinatlar, hassasiyet='orta', yerlesim_maskesi=True):
         .addBands(skor_puruzsuz.rename('skor')) \
         .addBands(demir.rename('demir')) \
         .addBands(kil.rename('kil')) \
-        .addBands(birliktelik.rename('birliktelik')) \
-        .addBands(kararlilik.rename('kararlilik'))
+        .addBands(denge_p.rename('denge')) \
+        .addBands(guc_p.rename('guc')) \
+        .addBands(kararlilik_p.rename('kararlilik'))
 
     vektorler = cok_bantli.reduceToVectors(
         geometry=aoi, crs=ORTAK_CRS, scale=ORTAK_OLCEK,
@@ -452,10 +523,19 @@ def analiz_v4(koordinatlar, hassasiyet='orta', yerlesim_maskesi=True):
     ozellikler = [o for o in (ham.get('features') or []) if gecerli_mi(o)]
 
     # Siralama: en guclu hedefler basta olsun ki rapor dogrudan okunabilsin
+    # Siralama: once sinif, sonra KALITE (denge x kararlilik x guc), sonra alan.
+    # Boylece ayni siniftaki poligonlar da gercek olcutlere gore siralanir.
+    def kalite(o):
+        pr = o['properties']
+        return ((pr.get('denge') or 0)
+                * (pr.get('kararlilik') or 0)
+                * (pr.get('guc') or 0))
+
     ozellikler.sort(
         key=lambda o: (
             -(o['properties'].get('sinif') or 0),
-            -(o['properties'].get('skor') or 0),
+            -kalite(o),
+            -(o['properties'].get('alan_m2') or 0),
         )
     )
 
@@ -472,8 +552,8 @@ def analiz_v4(koordinatlar, hassasiyet='orta', yerlesim_maskesi=True):
         'kullanilan_tarihler': kullanilan_tarihler,
         'goruntu_sayisi': goruntu_sayisi,
         'hassasiyet': hassasiyet,
-        'yuzdelikler': yuzdelikler,
-        'esikler': esikler,
+        'kurallar': esikler,
+        'esikler': esikler,          # geriye donuk uyumluluk
         'ayrim': ayrim,
         'birliktelik_esigi': round(birliktelik_esigi, 4),
         'crosta': {

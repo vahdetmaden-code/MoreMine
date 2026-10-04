@@ -18,10 +18,22 @@ import { RENKLER, ETIKETLER, ONERILER } from './siniflar';
  * de açıkça yazılı: "yüzey imzası".
  */
 
+/*
+ * SINIF KURALLARI — api/analyze_v4.py ile BIREBIR AYNI olmalı.
+ * Sunucu kuralları sonuçla birlikte gönderiyor; bu tablo sadece
+ * sonuç gelmeden önce lejantı gösterebilmek için yedek.
+ */
+const KURAL_TABLOSU = {
+  4: { denge: 0.80, kararlilik: 0.75, guc: 0.60 },
+  3: { denge: 0.65, kararlilik: 0.60, guc: 0.50 },
+  2: { denge: 0.50, kararlilik: 0.40, guc: 0.40 },
+  1: { denge: 0.35, kararlilik: 0.25, guc: 0.30 },
+};
+
 const HASSASIYETLER = [
-  { deger: 'yuksek', etiket: 'Yüksek', aciklama: 'Bölgenin üst %30\'u' },
-  { deger: 'orta', etiket: 'Orta', aciklama: 'Bölgenin üst %15\'i — varsayılan' },
-  { deger: 'dusuk', etiket: 'Düşük', aciklama: 'Bölgenin üst %7\'si' },
+  { deger: 'yuksek', etiket: 'Yüksek', aciklama: 'Gevşek eşikler — daha çok hedef' },
+  { deger: 'orta', etiket: 'Orta', aciklama: 'Dengeli — varsayılan' },
+  { deger: 'dusuk', etiket: 'Düşük', aciklama: 'Katı eşikler — sadece en net hedefler' },
 ];
 
 /*
@@ -228,33 +240,59 @@ function v4Bilgi(feature, layer) {
   const p = feature.properties;
   const demir = p.demir ?? 0;
   const kil = p.kil ?? 0;
+  const denge = p.denge ?? dengeHesapla(demir, kil);
+  const guc = p.guc ?? Math.sqrt(demir * kil);
   const kararlilik = p.kararlilik ?? 0;
-  const denge = dengeHesapla(demir, kil);
+  const sinif = p.sinif || 0;
 
-  // Yorum DENGEYE ve KARARLILIĞA bakar, mutlak yüksekliğe değil.
-  // Sınıf bölgesel sıralamadan gelir; ikisi farklı ölçektir.
-  let yorum;
-  if (denge >= 0.7 && kararlilik >= 0.6) {
-    yorum = 'Mineral birlikteliği dengeli ve zamanla kararlı — en güçlü hedef türü.';
-  } else if (denge >= 0.7) {
-    yorum = 'Mineral birlikteliği iyi, ancak az sayıda tarihte görünüyor.';
-  } else if (kararlilik >= 0.6) {
-    yorum = demir > kil
-      ? 'Kalıcı sinyal ama demir baskın — alüvyon/toprak ihtimali var.'
-      : 'Kalıcı sinyal ama kil baskın — alterasyonla ilgisiz killeşme olabilir.';
-  } else {
-    yorum = 'Hem denge hem kararlılık zayıf.';
+  // Bir üst sınıfın kuralı — neyin eksik kaldığını göstermek için
+  const ustSinif = sinif + 1;
+  const ustKural = KURAL_TABLOSU[ustSinif];
+  let eksik = '';
+  if (ustKural) {
+    const eksikler = [];
+    if (denge < ustKural.denge) {
+      eksikler.push(`denge %${Math.round(ustKural.denge * 100)} gerekiyor`);
+    }
+    if (kararlilik < ustKural.kararlilik) {
+      eksikler.push(`kararlılık %${Math.round(ustKural.kararlilik * 100)} gerekiyor`);
+    }
+    if (guc < ustKural.guc) {
+      eksikler.push(`güç ${ustKural.guc.toFixed(2)} gerekiyor`);
+    }
+    if (eksikler.length) {
+      eksik = `<div style="margin-top:5px;color:#78350f;font-size:11px">`
+        + `Bir üst sınıf için: ${eksikler.join(', ')}</div>`;
+    }
   }
 
+  const satir = (ad, deger, esik, bicim) => {
+    const gecti = deger >= esik;
+    return `<tr>`
+      + `<td style="padding-right:8px">${ad}</td>`
+      + `<td style="text-align:right;font-weight:600">${bicim(deger)}</td>`
+      + `<td style="padding-left:6px;color:${gecti ? '#16a34a' : '#dc2626'}">`
+      + `${gecti ? '✓' : '✕'} ${bicim(esik)}</td></tr>`;
+  };
+
+  const kural = KURAL_TABLOSU[sinif] || { denge: 0, kararlilik: 0, guc: 0 };
+  const yuzde = (v) => `%${Math.round(v * 100)}`;
+  const ondalik = (v) => v.toFixed(2);
+
   layer.bindTooltip(
-    `<b>v4 — ${ETIKETLER[String(p.sinif)] || p.sinif}</b><br/>` +
-    `<span style="color:#475569;font-size:11px">Sınıf bölgesel sıralamadan gelir</span><br/>` +
-    `<b>Alan: ${alanYazi(p.alan_m2)}</b><br/>` +
-    `Demir oksit: ${(demir * 100).toFixed(0)}%<br/>` +
-    `Kil (hidroksil): ${(kil * 100).toFixed(0)}%<br/>` +
-    `Denge: ${(denge * 100).toFixed(0)}%<br/>` +
-    `Zamansal kararlılık: ${(kararlilik * 100).toFixed(0)}%<br/>` +
-    `<i>${yorum}</i>`
+    `<b>v4 — ${ETIKETLER[String(sinif)] || sinif}</b><br/>`
+    + `<b style="color:#0e7490">Alan: ${alanYazi(p.alan_m2)}</b>`
+    + `<table style="font-size:11.5px;margin-top:5px;border-collapse:collapse">`
+    + `<tr style="color:#64748b;font-size:10px">`
+    + `<td>ölçüt</td><td style="text-align:right">değer</td>`
+    + `<td style="padding-left:6px">bu sınıf için</td></tr>`
+    + satir('Denge', denge, kural.denge, yuzde)
+    + satir('Kararlılık', kararlilik, kural.kararlilik, yuzde)
+    + satir('Güç', guc, kural.guc, ondalik)
+    + `</table>`
+    + `<div style="margin-top:4px;color:#64748b;font-size:10.5px">`
+    + `Demir %${Math.round(demir * 100)} · Kil %${Math.round(kil * 100)}</div>`
+    + eksik
   );
 }
 
@@ -579,7 +617,10 @@ export default function AnalizV4({
                       const p = o.properties;
                       const demir = p.demir ?? 0;
                       const kil = p.kil ?? 0;
-                      const denge = dengeHesapla(demir, kil);
+                      const denge = p.denge ?? dengeHesapla(demir, kil);
+                      const guc = p.guc ?? Math.sqrt(demir * kil);
+                      const kural = (sonuc.kurallar && sonuc.kurallar[String(p.sinif)])
+                        || KURAL_TABLOSU[p.sinif] || { denge: 0, kararlilik: 0, guc: 0 };
                       const toplam = demir + kil || 1;
                       return (
                         <div
@@ -609,18 +650,37 @@ export default function AnalizV4({
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5, color: '#94a3b8' }}>
                             <span>Demir %{(demir * 100).toFixed(0)}</span>
                             <span>Kil %{(kil * 100).toFixed(0)}</span>
-                            <span style={{ color: denge >= 0.7 ? '#4ade80' : '#94a3b8' }}>
-                              Denge %{(denge * 100).toFixed(0)}
-                            </span>
                           </div>
-                          <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 2 }}>
-                            Kararlılık %{((p.kararlilik ?? 0) * 100).toFixed(0)}
-                            {p.merkez_lat && (
-                              <span style={{ color: '#475569' }}>
-                                {' · '}{p.merkez_lat.toFixed(4)}, {p.merkez_lon.toFixed(4)}
-                              </span>
-                            )}
+
+                          {/* Üç ölçüt, sınıf eşiğiyle birlikte */}
+                          <div style={{
+                            display: 'flex', gap: 6, marginTop: 4,
+                            fontSize: 10, textAlign: 'center',
+                          }}>
+                            {[
+                              { ad: 'Denge', deger: denge, esik: kural.denge, yuzde: true },
+                              { ad: 'Kararlılık', deger: p.kararlilik ?? 0, esik: kural.kararlilik, yuzde: true },
+                              { ad: 'Güç', deger: guc, esik: kural.guc, yuzde: false },
+                            ].map((o) => (
+                              <div key={o.ad} style={{
+                                flex: 1,
+                                background: 'rgba(8,51,68,0.55)',
+                                borderRadius: 4, padding: '3px 2px',
+                                border: `1px solid ${o.deger >= o.esik ? 'rgba(34,197,94,0.35)' : 'rgba(148,163,184,0.2)'}`,
+                              }}>
+                                <div style={{ color: '#64748b' }}>{o.ad}</div>
+                                <b style={{ color: o.deger >= o.esik ? '#4ade80' : '#cbd5e1' }}>
+                                  {o.yuzde ? `%${Math.round(o.deger * 100)}` : o.deger.toFixed(2)}
+                                </b>
+                              </div>
+                            ))}
                           </div>
+
+                          {p.merkez_lat && (
+                            <div style={{ fontSize: 10, color: '#475569', marginTop: 3 }}>
+                              {p.merkez_lat.toFixed(4)}, {p.merkez_lon.toFixed(4)}
+                            </div>
+                          )}
                           {p.sinif >= 3 && (
                             <div style={{ fontSize: 10.5, color: '#fca5a5', marginTop: 3, lineHeight: 1.4 }}>
                               {ONERILER[String(p.sinif)]}
@@ -650,12 +710,58 @@ export default function AnalizV4({
                 </div>
               )}
 
+              {/* SINIF KURALLARI — neyin neden o sınıfta olduğu açıkça görünsün */}
+              <div style={{
+                borderTop: '1px solid #164e63', paddingTop: 10, marginBottom: 10,
+                fontSize: 10.5,
+              }}>
+                <b style={{ color: '#cbd5e1', fontSize: 11.5 }}>Sınıf kuralları</b>
+                <div style={{ color: '#64748b', marginBottom: 5, lineHeight: 1.45 }}>
+                  Bir alan, <b>üç ölçütü birden</b> sağladığı en yüksek sınıfı alır.
+                  Eşikler sabittir — bölgeye göre değişmez.
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10.5 }}>
+                  <thead>
+                    <tr style={{ color: '#64748b' }}>
+                      <th style={{ textAlign: 'left', fontWeight: 400, paddingBottom: 3 }}>Sınıf</th>
+                      <th style={{ textAlign: 'right', fontWeight: 400 }}>Denge</th>
+                      <th style={{ textAlign: 'right', fontWeight: 400 }}>Kararlılık</th>
+                      <th style={{ textAlign: 'right', fontWeight: 400 }}>Güç</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[4, 3, 2, 1].map((sn) => {
+                      const k = (sonuc.kurallar && sonuc.kurallar[String(sn)]) || KURAL_TABLOSU[sn];
+                      if (!k) return null;
+                      return (
+                        <tr key={sn}>
+                          <td style={{ paddingTop: 2 }}>
+                            <span style={{
+                              display: 'inline-block', width: 9, height: 9, borderRadius: 2,
+                              background: RENKLER[String(sn)], marginRight: 5,
+                            }} />
+                            {ETIKETLER[String(sn)]}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>%{Math.round(k.denge * 100)}</td>
+                          <td style={{ textAlign: 'right' }}>%{Math.round(k.kararlilik * 100)}</td>
+                          <td style={{ textAlign: 'right' }}>{k.guc.toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div style={{ color: '#64748b', marginTop: 6, lineHeight: 1.5 }}>
+                  <b>Denge</b>: demir ve kilin birbirine denkliği ·
+                  <b> Kararlılık</b>: kaç görüntüde göründüğü ·
+                  <b> Güç</b>: sinyalin şiddeti
+                </div>
+              </div>
+
               <div style={{
                 fontSize: 10.5, color: '#94a3b8', lineHeight: 1.6,
                 borderTop: '1px solid #164e63', paddingTop: 8,
               }}>
-                Kullanılan görüntü: {sonuc.goruntu_sayisi} ·
-                Eşik: {sonuc.esikler?.['1']}<br /><br />
+                Kullanılan görüntü: {sonuc.goruntu_sayisi}<br /><br />
                 <span style={{ color: '#64748b' }}>
                   İç içe halkalar hedefin <b>sinyal yoğunluğunu</b> gösterir:
                   çekirdek, imzanın en güçlü olduğu kısımdır. Ölçüm yüzeyden
