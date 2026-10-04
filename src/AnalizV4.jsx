@@ -230,20 +230,44 @@ function alanYazi(m2) {
   return `${Math.round(m2).toLocaleString('tr-TR')} m²`;
 }
 
-function dengeHesapla(demir, kil) {
-  const buyuk = Math.max(demir, kil);
-  const kucuk = Math.min(demir, kil);
-  return buyuk > 0 ? kucuk / buyuk : 0;
-}
 
 function v4Bilgi(feature, layer) {
   const p = feature.properties;
   const demir = p.demir ?? 0;
   const kil = p.kil ?? 0;
-  const denge = p.denge ?? dengeHesapla(demir, kil);
-  const guc = p.guc ?? Math.sqrt(demir * kil);
-  const kararlilik = p.kararlilik ?? 0;
   const sinif = p.sinif || 0;
+  const kararlilik = p.kararlilik ?? 0;
+
+  /*
+   * ESKİ SONUÇ TESPİTİ
+   * denge ve guc öznitelikleri kural tabanlı sınıflandırmayla birlikte
+   * eklendi. Daha önce kaydedilmiş bir v4 sonucunda bunlar YOKTUR.
+   *
+   * Önceden bu durumda ortalama demir/kil'den denge hesaplıyordum —
+   * bu YANLIŞTI: her pikselin dengesi 0.80 üstündeyse dengelerin
+   * ortalaması da 0.80 üstündedir, ama ortalama demirin ortalama kile
+   * oranı bambaşka bir sayıdır. Sonuç: sınıfla çelişen bir denge değeri
+   * görünüyordu. Artık uydurmak yerine durumu açıkça söylüyoruz.
+   */
+  const eskiSonuc = p.denge == null || p.guc == null;
+  const denge = p.denge;
+  const guc = p.guc;
+
+  if (eskiSonuc) {
+    layer.bindTooltip(
+      `<b>v4 — ${ETIKETLER[String(sinif)] || sinif}</b><br/>`
+      + `<b style="color:#0e7490">Alan: ${alanYazi(p.alan_m2)}</b><br/>`
+      + `<span style="font-size:11px">Demir %${Math.round(demir * 100)} · `
+      + `Kil %${Math.round(kil * 100)} · Kararlılık %${Math.round(kararlilik * 100)}</span>`
+      + `<div style="margin-top:6px;padding:5px 7px;background:#fef3c7;`
+      + `border-left:3px solid #d97706;font-size:10.5px;line-height:1.5;color:#78350f">`
+      + `<b>Eski sonuç.</b> Bu tarama, kural tabanlı sınıflandırmadan önce `
+      + `kaydedilmiş. Sınıfı eski yönteme göre verilmiş, yandaki kural `
+      + `tablosuyla karşılaştırılamaz.<br/>`
+      + `<b>Yeniden tara</b> dersen güncel kurallarla hesaplanır.</div>`
+    );
+    return;
+  }
 
   // Bir üst sınıfın kuralı — neyin eksik kaldığını göstermek için
   const ustSinif = sinif + 1;
@@ -440,6 +464,11 @@ export default function AnalizV4({
 
   const toplamAlan = hedefler.reduce((t, o) => t + (o.properties.alan_m2 || 0), 0);
 
+  // Kural tabanlı sınıflandırmadan ÖNCE kaydedilmiş sonuçlar denge/guc
+  // özniteliği taşımaz; sınıfları eski yönteme göre verilmiştir.
+  const eskiKayit = hedefler.length > 0
+    && hedefler.every((o) => o.properties.denge == null);
+
   return (
     <>
       {/*
@@ -567,6 +596,19 @@ export default function AnalizV4({
                 </div>
               )}
 
+              {eskiKayit && (
+                <div style={{
+                  background: '#78350f', border: '1px solid #d97706',
+                  borderRadius: 8, padding: 10, marginBottom: 10,
+                  fontSize: 11.5, lineHeight: 1.55,
+                }}>
+                  <b>Bu sonuç eski kurallarla üretilmiş.</b><br />
+                  Sınıflar bölgesel yüzdelik yöntemine göre verilmiş, aşağıdaki
+                  kural tablosuyla karşılaştırılamaz. Güncel kurallarla görmek
+                  için <b>Derin Taramayı Başlat</b> deyip yeniden çalıştır.
+                </div>
+              )}
+
               {/* ÖZET */}
               <div style={{
                 background: 'rgba(8,51,68,0.5)', border: '1px solid #155e75',
@@ -617,8 +659,9 @@ export default function AnalizV4({
                       const p = o.properties;
                       const demir = p.demir ?? 0;
                       const kil = p.kil ?? 0;
-                      const denge = p.denge ?? dengeHesapla(demir, kil);
-                      const guc = p.guc ?? Math.sqrt(demir * kil);
+                      const eski = p.denge == null || p.guc == null;
+                      const denge = p.denge;
+                      const guc = p.guc;
                       const kural = (sonuc.kurallar && sonuc.kurallar[String(p.sinif)])
                         || KURAL_TABLOSU[p.sinif] || { denge: 0, kararlilik: 0, guc: 0 };
                       const toplam = demir + kil || 1;
@@ -653,6 +696,15 @@ export default function AnalizV4({
                           </div>
 
                           {/* Üç ölçüt, sınıf eşiğiyle birlikte */}
+                          {eski ? (
+                            <div style={{
+                              marginTop: 4, padding: '4px 6px', borderRadius: 4,
+                              background: 'rgba(120,53,15,0.4)', border: '1px solid #92400e',
+                              fontSize: 10, color: '#fcd34d', lineHeight: 1.4,
+                            }}>
+                              Eski sonuç — sınıfı eski yönteme göre. Yeniden tara.
+                            </div>
+                          ) : (
                           <div style={{
                             display: 'flex', gap: 6, marginTop: 4,
                             fontSize: 10, textAlign: 'center',
@@ -675,6 +727,7 @@ export default function AnalizV4({
                               </div>
                             ))}
                           </div>
+                          )}
 
                           {p.merkez_lat && (
                             <div style={{ fontSize: 10, color: '#475569', marginTop: 3 }}>
