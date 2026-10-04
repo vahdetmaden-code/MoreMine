@@ -25,11 +25,73 @@ const HASSASIYETLER = [
 ];
 
 /*
- * DERİN TARAMA EFEKTİ
- * Leaflet vektörleri SVG olarak çizer, dolayısıyla SVG filtreleriyle
- * parlama verebiliyoruz. Filtre tanımlarını bir kez sayfaya enjekte edip
- * poligonlara className ile bağlıyoruz.
+ * DERİN TARAMA GÖRSELİ — JEOLOJİK KESİT
+ * -------------------------------------
+ * Her hedef, iç içe geçmiş DERİNLİK HALKALARI olarak çizilir: dıştan içe
+ * doğru daralan 4 katman, en içteki en parlak. Bu, jeolojik kesit ve
+ * sondaj logu haritalarının görsel diliyle aynı — bakan göz doğrudan
+ * "aşağı doğru inen bir yapı" olarak okur.
+ *
+ * Halkalar, poligonun köşelerini kendi ağırlık merkezine doğru
+ * ölçekleyerek üretiliyor. Gerçek bir buffer değil ama görsel olarak
+ * istenen derinlik hissini veriyor ve her şekilde çalışıyor (gerçek
+ * negatif buffer ince poligonları tamamen yok ederdi — v3'te bu sorunu
+ * yaşamıştık).
  */
+
+const HALKALAR = [
+  { olcek: 1.00, katman: 0, dolguOpaklik: 0.14, cizgi: 2.0, parlaklik: 0.55 },
+  { olcek: 0.74, katman: 1, dolguOpaklik: 0.20, cizgi: 1.4, parlaklik: 0.75 },
+  { olcek: 0.50, katman: 2, dolguOpaklik: 0.28, cizgi: 1.2, parlaklik: 0.90 },
+  { olcek: 0.27, katman: 3, dolguOpaklik: 0.62, cizgi: 1.6, parlaklik: 1.00 },
+];
+
+function halkaMerkezi(halka) {
+  const n = Math.max(halka.length - 1, 1);
+  let x = 0, y = 0;
+  for (let i = 0; i < n; i++) { x += halka[i][0]; y += halka[i][1]; }
+  return [x / n, y / n];
+}
+
+function halkayiKucult(halka, olcek) {
+  const [cx, cy] = halkaMerkezi(halka);
+  return halka.map(([x, y]) => [cx + (x - cx) * olcek, cy + (y - cy) * olcek]);
+}
+
+/*
+ * Tek bir GeoJSON'u derinlik katmanlarına ayırır.
+ * Dönen her katman ayrı bir GeoJSON; haritaya üst üste çizilince
+ * iç içe halkalar oluşuyor.
+ */
+function derinlikKatmanlari(geojson) {
+  if (!geojson?.features?.length) return [];
+
+  return HALKALAR.map((h) => ({
+    ayar: h,
+    veri: {
+      type: 'FeatureCollection',
+      features: geojson.features.map((o) => {
+        const g = o.geometry;
+        let yeniGeo;
+        if (g.type === 'Polygon') {
+          yeniGeo = {
+            type: 'Polygon',
+            coordinates: [halkayiKucult(g.coordinates[0], h.olcek)],
+          };
+        } else if (g.type === 'MultiPolygon') {
+          yeniGeo = {
+            type: 'MultiPolygon',
+            coordinates: g.coordinates.map((poly) => [halkayiKucult(poly[0], h.olcek)]),
+          };
+        } else {
+          yeniGeo = g;
+        }
+        return { ...o, geometry: yeniGeo };
+      }),
+    },
+  }));
+}
+
 const EFEKT_KIMLIGI = 'mm-v4-efekt';
 
 function efektiEnjekteEt() {
@@ -38,40 +100,81 @@ function efektiEnjekteEt() {
   const stil = document.createElement('style');
   stil.id = EFEKT_KIMLIGI;
   stil.textContent = `
-    @keyframes mm-v4-nabiz {
-      0%, 100% { stroke-opacity: 1;    stroke-width: 3; }
-      50%      { stroke-opacity: 0.55; stroke-width: 5; }
+    @keyframes mm-v4-derinlik {
+      0%, 100% { opacity: 0.80; }
+      50%      { opacity: 1; }
     }
-    @keyframes mm-v4-tarama {
+    @keyframes mm-v4-cekirdek {
+      0%, 100% { opacity: 0.70; stroke-width: 1.4; }
+      50%      { opacity: 1;    stroke-width: 2.6; }
+    }
+    @keyframes mm-v4-sondaj {
       0%   { stroke-dashoffset: 0; }
-      100% { stroke-dashoffset: -36; }
+      100% { stroke-dashoffset: -28; }
     }
-    .mm-v4-poligon {
+    /* Dış halkalar: yüzeye yakın katmanlar, sakin */
+    .mm-v4-katman-0 { filter: url(#mm-v4-sis); }
+    .mm-v4-katman-1 { filter: url(#mm-v4-sis); }
+    /* İç halkalar: derinleştikçe parlar ve nabız atar */
+    .mm-v4-katman-2 {
       filter: url(#mm-v4-parlama);
+      animation: mm-v4-derinlik 3s ease-in-out infinite;
     }
-    .mm-v4-poligon.mm-v4-sinif-4 {
-      animation: mm-v4-nabiz 1.8s ease-in-out infinite;
+    .mm-v4-katman-3 {
+      filter: url(#mm-v4-cekirdek-parlama);
+      animation: mm-v4-cekirdek 2.1s ease-in-out infinite;
     }
-    .mm-v4-poligon.mm-v4-sinif-3 {
-      animation: mm-v4-nabiz 2.6s ease-in-out infinite;
+    /* Dış kontur: sondaj hattı gibi akan kesikli çizgi */
+    .mm-v4-katman-0 path {
+      stroke-dasharray: 7 5;
+      animation: mm-v4-sondaj 2.6s linear infinite;
     }
   `;
   document.head.appendChild(stil);
 
-  // SVG filtre tanımı — haritanın kendi SVG'sine değil, ayrı gizli bir
-  // SVG'ye koyuyoruz ki Leaflet yeniden çizdiğinde silinmesin.
+  // Filtreler ayrı, gizli bir SVG'de duruyor ki Leaflet yeniden
+  // çizdiğinde silinmesinler.
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('width', '0');
   svg.setAttribute('height', '0');
-  svg.style.position = 'absolute';
+  svg.setAttribute('aria-hidden', 'true');
+  svg.style.cssText = 'position:absolute;pointer-events:none';
   svg.innerHTML = `
     <defs>
-      <filter id="mm-v4-parlama" x="-60%" y="-60%" width="220%" height="220%">
-        <feGaussianBlur in="SourceAlpha" stdDeviation="4" result="bulanik"/>
-        <feFlood flood-color="#22d3ee" flood-opacity="0.75" result="renk"/>
-        <feComposite in="renk" in2="bulanik" operator="in" result="hale"/>
+      <!-- Jeolojik kesit tarama deseni: eğik çizgiler -->
+      <pattern id="mm-v4-tarama-deseni" width="7" height="7"
+               patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <line x1="0" y1="0" x2="0" y2="7"
+              stroke="rgba(103,232,249,0.45)" stroke-width="1.6"/>
+      </pattern>
+
+      <!-- Yüzey katmanları: hafif, dağınık sis -->
+      <filter id="mm-v4-sis" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="2.5" result="b"/>
+        <feFlood flood-color="#0e7490" flood-opacity="0.5" result="r"/>
+        <feComposite in="r" in2="b" operator="in" result="h"/>
+        <feMerge><feMergeNode in="h"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+
+      <!-- Orta derinlik: belirgin camgöbeği hale -->
+      <filter id="mm-v4-parlama" x="-70%" y="-70%" width="240%" height="240%">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="5" result="b"/>
+        <feFlood flood-color="#22d3ee" flood-opacity="0.85" result="r"/>
+        <feComposite in="r" in2="b" operator="in" result="h"/>
+        <feMerge><feMergeNode in="h"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+
+      <!-- Çekirdek: iki katlı yoğun parlama, "sıcak nokta" hissi -->
+      <filter id="mm-v4-cekirdek-parlama" x="-120%" y="-120%" width="340%" height="340%">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="10" result="genis"/>
+        <feFlood flood-color="#22d3ee" flood-opacity="0.9" result="r1"/>
+        <feComposite in="r1" in2="genis" operator="in" result="disHale"/>
+        <feGaussianBlur in="SourceAlpha" stdDeviation="3" result="dar"/>
+        <feFlood flood-color="#ffffff" flood-opacity="0.85" result="r2"/>
+        <feComposite in="r2" in2="dar" operator="in" result="icHale"/>
         <feMerge>
-          <feMergeNode in="hale"/>
+          <feMergeNode in="disHale"/>
+          <feMergeNode in="icHale"/>
           <feMergeNode in="SourceGraphic"/>
         </feMerge>
       </filter>
@@ -79,17 +182,32 @@ function efektiEnjekteEt() {
   document.body.appendChild(svg);
 }
 
-function v4Stil(feature) {
-  const sinif = feature.properties.sinif || 1;
-  const renk = RENKLER[String(sinif)] || '#22c55e';
-  return {
-    className: `mm-v4-poligon mm-v4-sinif-${sinif}`,
-    color: renk,
-    weight: sinif >= 3 ? 3.5 : 2.5,
-    opacity: 1,
-    fillColor: renk,
-    // Güçlü sınıflar daha dolgun: haritada hemen göze çarpsın
-    fillOpacity: sinif === 4 ? 0.55 : sinif === 3 ? 0.45 : 0.3,
+/*
+ * Katman bazlı stil. Sınıf rengi KORUNUR — kullanıcının istediği gibi
+ * renk kırılımı v1/v2/v3 ile aynı kalıyor; derinlik hissi opaklık,
+ * parlama ve halka daralmasıyla veriliyor.
+ */
+function v4KatmanStili(ayar) {
+  return (feature) => {
+    const sinif = feature.properties.sinif || 1;
+    const renk = RENKLER[String(sinif)] || '#22c55e';
+    const guclu = sinif >= 3;
+
+    return {
+      className: `mm-v4-katman-${ayar.katman}`,
+      color: ayar.katman === 3 ? '#e0f2fe' : renk,
+      weight: ayar.cizgi * (guclu ? 1.25 : 1),
+      opacity: ayar.parlaklik,
+      // En dış halka: jeolojik kesit dokusu (eğik tarama çizgileri).
+      // İç halkalar sınıf rengini taşır, böylece renk kırılımı korunur.
+      fillColor: ayar.katman === 0 ? 'url(#mm-v4-tarama-deseni)' : renk,
+      fillOpacity: ayar.katman === 0
+        ? 0.5
+        : ayar.dolguOpaklik * (guclu ? 1.15 : 0.8),
+      // Tıklama/ipucu yalnızca en dış halkada olsun; iç halkalar
+      // fare olaylarını yutmasın.
+      interactive: ayar.katman === 0,
+    };
   };
 }
 
@@ -286,14 +404,19 @@ export default function AnalizV4({
 
   return (
     <>
-      {gorunur && (filtre?.v4 !== false) && poligonSayisi > 0 && temizSonuc && (
-        <GeoJSON
-          key={`v4-${hassasiyet}-${poligonSayisi}-${yerlesimMaskesi}-${(filtre?.siniflar || []).join('')}`}
-          data={temizSonuc}
-          style={v4Stil}
-          onEachFeature={v4Bilgi}
-        />
-      )}
+      {/*
+        * Derinlik katmanları: dıştan içe 4 halka, üst üste çizilir.
+        * Sıra önemli — dıştaki önce, çekirdek en son (en üstte).
+        */}
+      {gorunur && (filtre?.v4 !== false) && poligonSayisi > 0 && temizSonuc
+        && derinlikKatmanlari(temizSonuc).map(({ ayar, veri }) => (
+          <GeoJSON
+            key={`v4-k${ayar.katman}-${hassasiyet}-${poligonSayisi}-${yerlesimMaskesi}-${(filtre?.siniflar || []).join('')}`}
+            data={veri}
+            style={v4KatmanStili(ayar)}
+            onEachFeature={ayar.katman === 0 ? v4Bilgi : undefined}
+          />
+        ))}
 
       {acik && (
         <div style={{
@@ -533,10 +656,10 @@ export default function AnalizV4({
               }}>
                 Kullanılan görüntü: {sonuc.goruntu_sayisi} ·
                 Eşik: {sonuc.esikler?.['1']}<br /><br />
-                <span style={{ color: '#fbbf24' }}>
-                  Parlama efekti görsel bir vurgudur, derinlik ölçümü değildir.
-                  Optik uydu yalnızca <b>yüzey</b> imzasını görür; doğrulama
-                  sahada yapılır.
+                <span style={{ color: '#64748b' }}>
+                  İç içe halkalar hedefin <b>sinyal yoğunluğunu</b> gösterir:
+                  çekirdek, imzanın en güçlü olduğu kısımdır. Ölçüm yüzeyden
+                  yapılır; saha kontrolü kesin sonucu verir.
                 </span>
               </div>
             </>
