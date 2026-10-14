@@ -17,6 +17,8 @@ import AnalizV4 from './AnalizV4';
 import BilesikRapor from './BilesikRapor';
 import ParselKatmani from './ParselKatmani';
 import AracCubugu from './AracCubugu';
+import DokunmaYalitimi from './DokunmaYalitimi';
+import { GEOMAN_IGNE_AYARI } from './igne';
 import { RENKLER, ETIKETLER, ONERILER, MINERAL_ETIKETLERI } from './siniflar';
 
 function geojsonStil(feature) {
@@ -64,6 +66,9 @@ function CizimAraci({ onAlanCizildi }) {
   useEffect(() => {
     if (kontrolEklendiRef.current) return;
     kontrolEklendiRef.current = true;
+
+    // Geoman'ın kendi iğnesi de gömülü SVG'yi kullansın (kırık ikon düzeltmesi)
+    map.pm.setGlobalOptions(GEOMAN_IGNE_AYARI);
 
     map.pm.addControls({
       position: 'topleft',
@@ -1010,6 +1015,7 @@ function AnaUygulama({ oturum, rol }) {
         <div style={{ flex: 1, position: 'relative' }}>
           <MapContainer center={[40.97, 29.06]} zoom={14} style={{ height: '100%', width: '100%' }}>
             <TileLayer url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxZoom={22} maxNativeZoom={20} />
+            <DokunmaYalitimi />
             <MerkezTakibi merkezRef={merkezRef} />
             <NoktayaUc hedef={ucusHedefi} />
             <KonumTespiti tetikleyici={konumTetikleyici} />

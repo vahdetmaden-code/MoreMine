@@ -31,6 +31,14 @@ export const PANELLER = [
 // gibi yan modüller "rapor hazırlanıyor" izlenimi vermesin.
 const RAPOR_MOTORLARI = ['v1', 'v2', 'v3', 'v4'];
 
+// Dokunmatik ekranda (iPad/telefon) parmak hedefleri büyütülür.
+// Apple'ın önerdiği asgari dokunma alanı 44x44 px; fare ile bu kadar
+// büyük düğme gereksiz yer kapladığı için yalnızca coarse pointer'da.
+const DOKUNMATIK =
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(pointer: coarse)').matches;
+
 export default function AracCubugu({ acik, onDegis, durumlar = {} }) {
   const [genis, setGenis] = useState(false);
 
@@ -40,6 +48,9 @@ export default function AracCubugu({ acik, onDegis, durumlar = {} }) {
     <div style={{
       position: 'absolute', right: 12, bottom: 12, zIndex: 1001,
       display: 'flex', gap: 6, alignItems: 'center',
+      // Panel sayısı arttı; dar ekranda tek sıraya sığmayınca ekran dışına
+      // taşmak yerine alt satıra sarsın. Sağa dayalı kalır.
+      flexWrap: 'wrap', justifyContent: 'flex-end',
       maxWidth: 'calc(100vw - 24px)',
     }}>
       {/* Dar ekranlarda etiketleri gizleyip sadece ikon göster;
@@ -49,7 +60,9 @@ export default function AracCubugu({ acik, onDegis, durumlar = {} }) {
         title={genis ? 'Etiketleri gizle' : 'Etiketleri göster'}
         style={{
           background: 'rgba(15,23,42,0.94)', color: '#94a3b8',
-          border: 'none', borderRadius: 10, padding: '10px 10px',
+          border: 'none', borderRadius: 10,
+          padding: DOKUNMATIK ? '12px 14px' : '10px 10px',
+          minHeight: DOKUNMATIK ? 44 : undefined,
           cursor: 'pointer', fontSize: 13, lineHeight: 1,
           boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
         }}
@@ -77,7 +90,12 @@ export default function AracCubugu({ acik, onDegis, durumlar = {} }) {
               color: secili ? '#fff' : '#cbd5e1',
               border: secili ? 'none' : '1px solid rgba(148,163,184,0.25)',
               borderRadius: 10,
-              padding: genis ? '10px 13px' : '10px 11px',
+              padding: DOKUNMATIK
+                ? (genis ? '12px 15px' : '12px 13px')
+                : (genis ? '10px 13px' : '10px 11px'),
+              minWidth: DOKUNMATIK ? 44 : undefined,
+              minHeight: DOKUNMATIK ? 44 : undefined,
+              justifyContent: 'center',
               cursor: 'pointer', fontSize: 13, fontWeight: 600,
               whiteSpace: 'nowrap', lineHeight: 1,
               boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
