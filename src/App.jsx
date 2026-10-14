@@ -15,6 +15,7 @@ import TarihceKatmani from './TarihceKatmani';
 import AnalizV3 from './AnalizV3';
 import AnalizV4 from './AnalizV4';
 import BilesikRapor from './BilesikRapor';
+import ParselKatmani from './ParselKatmani';
 import AracCubugu from './AracCubugu';
 import { RENKLER, ETIKETLER, ONERILER, MINERAL_ETIKETLERI } from './siniflar';
 
@@ -89,13 +90,22 @@ function CizimAraci({ onAlanCizildi }) {
             <div style="font-size:12px; line-height:1.5;">
               <b>📍 İşaretlenen Konum</b><br/>
               ${lat.toFixed(6)}, ${lng.toFixed(6)}<br/>
-              <button
-                onclick="window.__konumPaylas(${lat}, ${lng})"
-                style="margin-top:6px; padding:6px 10px; border:none; border-radius:6px; background:#2563eb; color:white; cursor:pointer; font-size:12px;"
-              >Paylaş</button>
+              <div style="display:flex; gap:6px; margin-top:6px;">
+                <button
+                  onclick="window.__konumPaylas(${lat}, ${lng})"
+                  style="padding:6px 10px; border:none; border-radius:6px; background:#2563eb; color:white; cursor:pointer; font-size:12px;"
+                >Paylaş</button>
+                <button
+                  onclick="window.__parselSorgula && window.__parselSorgula(${lat}, ${lng})"
+                  style="padding:6px 10px; border:none; border-radius:6px; background:#0e7490; color:white; cursor:pointer; font-size:12px;"
+                >🧾 Parsel</button>
+              </div>
             </div>
           `)
           .openPopup();
+        // Pin bırakılır bırakılmaz parsel sorgusu başlasın; kullanıcı
+        // ayrıca balondaki düğmeyle tekrar sorgulayabilir.
+        if (window.__parselSorgula) window.__parselSorgula(lat, lng);
         return;
       }
 
@@ -269,6 +279,9 @@ function AnaUygulama({ oturum, rol }) {
   const [aramaSonuclari, setAramaSonuclari] = useState([]);
   const [aramaYukleniyor, setAramaYukleniyor] = useState(false);
   const [ucusHedefi, setUcusHedefi] = useState(null);
+  // Parsel sorgusu analiz motorlarından bağımsız: kendi noktası, kendi durumu.
+  const [parselNoktasi, setParselNoktasi] = useState(null);
+  const [parselDurum, setParselDurum] = useState(null);
   const [favoriler, setFavoriler] = useState([]);
   const [gizlenenleriGoster, setGizlenenleriGoster] = useState(false);
   const [sadeceFavoriler, setSadeceFavoriler] = useState(false);
@@ -276,6 +289,16 @@ function AnaUygulama({ oturum, rol }) {
   const [adminPaneliAcik, setAdminPaneliAcik] = useState(false);
   const [gorunum3D, setGorunum3D] = useState(false);
   const ciziliKatmanRef = useRef(null);
+
+  // Leaflet balonları düz HTML olduğu için React state'e erişemiyor;
+  // pin balonundaki "Parsel" düğmesi bu global köprüyü kullanıyor.
+  useEffect(() => {
+    window.__parselSorgula = (lat, lng) => {
+      setParselNoktasi({ lat, lng });
+      setAcikPanel('parsel');
+    };
+    return () => { delete window.__parselSorgula; };
+  }, []);
 
   const TARAMA_ASAMALARI = [
     'Uygun uydu aranıyor...',
@@ -996,13 +1019,18 @@ function AnaUygulama({ oturum, rol }) {
             {sonuc && sonucGorunur && katmanFiltre.v1 && <GeoJSON key={JSON.stringify(sonuc).length + '-' + katmanFiltre.siniflar.join('')} data={sonuc} style={geojsonStil} onEachFeature={ciziliAlaniGoster} filter={(f) => katmanFiltre.siniflar.includes(Number(f.properties.sinif))} />}
             <ManyetikKatman ciziliAlan={ciziliAlan} optikSonuc={sonuc} taramaId={null} acik={acikPanel === 'manyetik'} onKapat={() => setAcikPanel(null)} />
             <AnalizV2 ciziliAlan={ciziliAlan} onKaydedildi={gecmisiYukle} filtre={katmanFiltre} taramaId={aktifTaramaId} disSonuc={v2Sonuc} tetikleyici={zincirTetik} onDurum={v2Durum} acik={acikPanel === 'v2'} onKapat={() => setAcikPanel(null)} />
-            <AramaIsareti nokta={aramaIsareti} onTemizle={() => setAramaIsareti(null)} />
+            <AramaIsareti
+              nokta={aramaIsareti}
+              onTemizle={() => setAramaIsareti(null)}
+              onParsel={(n) => { setParselNoktasi({ lat: n.lat, lng: n.lng }); setAcikPanel('parsel'); }}
+            />
             <TarihceKatmani ciziliAlan={ciziliAlan} taramaId={aktifTaramaId} konumAdi={aktifKonumAdi} disTarihce={tarihce} acik={acikPanel === 'tarihce'} onKapat={() => setAcikPanel(null)} />
             <KatmanKontrol deger={katmanFiltre} onChange={setKatmanFiltre} acik={acikPanel === 'katman'} onKapat={() => setAcikPanel(null)} />
             <AnalizV3 ciziliAlan={ciziliAlan} filtre={katmanFiltre} tetikleyici={zincirTetik} onDurum={v3Durum} taramaId={aktifTaramaId} disSonuc={v3Sonuc} onKaydedildi={gecmisiYukle} acik={acikPanel === 'v3'} onKapat={() => setAcikPanel(null)} />
             <AnalizV4 ciziliAlan={ciziliAlan} filtre={katmanFiltre} tetikleyici={zincirTetik} onDurum={v4Durum} taramaId={aktifTaramaId} disSonuc={v4Sonuc} onKaydedildi={gecmisiYukle} onHedefeGit={(n) => setUcusHedefi({ lat: n.lat, lng: n.lng, zoom: 17 })} acik={acikPanel === 'v4'} onKapat={() => setAcikPanel(null)} />
             <BilesikRapor durumlar={motorDurum} acik={acikPanel === 'rapor'} onKapat={() => setAcikPanel(null)} />
-            <AracCubugu acik={acikPanel} onDegis={setAcikPanel} durumlar={motorDurum} />
+            <ParselKatmani nokta={parselNoktasi} onDurum={setParselDurum} acik={acikPanel === 'parsel'} onKapat={() => setAcikPanel(null)} />
+            <AracCubugu acik={acikPanel} onDegis={setAcikPanel} durumlar={{ ...motorDurum, parsel: parselDurum }} />
             <GuvenlikKatmani rol={rol} />
           </MapContainer>
 

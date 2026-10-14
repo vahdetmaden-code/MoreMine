@@ -20,6 +20,9 @@
     },
     "api/tarihce.py": {
       "maxDuration": 60
+    },
+    "api/parsel.py": {
+      "maxDuration": 30
     }
   }
 }

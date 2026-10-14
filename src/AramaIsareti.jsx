@@ -30,7 +30,7 @@ const IGNE_IKONU = L.divIcon({
   popupAnchor: [0, -38],
 });
 
-export default function AramaIsareti({ nokta, onTemizle }) {
+export default function AramaIsareti({ nokta, onTemizle, onParsel }) {
   const map = useMap();
   const [kopyalandi, setKopyalandi] = useState(false);
 
@@ -80,6 +80,18 @@ export default function AramaIsareti({ nokta, onTemizle }) {
             >
               {kopyalandi ? 'Kopyalandı' : 'Koordinatı kopyala'}
             </button>
+            {onParsel && (
+              <button
+                onClick={() => onParsel(nokta)}
+                title="Bu noktanın ada/parsel bilgisini sorgula"
+                style={{
+                  padding: '6px 10px', borderRadius: 6, border: 'none',
+                  background: '#0e7490', color: '#fff', cursor: 'pointer', fontSize: 12,
+                }}
+              >
+                🧾
+              </button>
+            )}
             {onTemizle && (
               <button
                 onClick={onTemizle}

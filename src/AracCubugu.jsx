@@ -24,7 +24,12 @@ export const PANELLER = [
   { id: 'v3', ikon: '⚗️', ad: 'v3 Mineral', renk: '#059669' },
   { id: 'manyetik', ikon: '🧲', ad: 'Manyetik', renk: '#7c3aed' },
   { id: 'tarihce', ikon: '📜', ad: 'Tarihçe', renk: '#b45309' },
+  { id: 'parsel', ikon: '🧾', ad: 'Parsel', renk: '#0e7490' },
 ];
+
+// Bileşik rapor rozetinde SADECE analiz motorları sayılır; parsel sorgusu
+// gibi yan modüller "rapor hazırlanıyor" izlenimi vermesin.
+const RAPOR_MOTORLARI = ['v1', 'v2', 'v3', 'v4'];
 
 export default function AracCubugu({ acik, onDegis, durumlar = {} }) {
   const [genis, setGenis] = useState(false);
@@ -58,7 +63,7 @@ export default function AracCubugu({ acik, onDegis, durumlar = {} }) {
         // Böylece panel kapalıyken de analizin durumu görünür.
         const motorDurum = durumlar[p.id]?.durum;
         const rozetRenk = p.id === 'rapor'
-          ? (Object.values(durumlar).some((x) => x?.durum === 'calisiyor') ? '#f59e0b' : null)
+          ? (RAPOR_MOTORLARI.some((m) => durumlar[m]?.durum === 'calisiyor') ? '#f59e0b' : null)
           : (motorDurum === 'calisiyor' ? '#f59e0b'
             : motorDurum === 'tamam' ? '#22c55e'
             : motorDurum === 'hata' ? '#dc2626' : null);
