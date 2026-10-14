@@ -33,6 +33,13 @@ import requests
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY")
 
+# TOPLAM SURE BUTCESI (saniye).
+# Vercel fonksiyonu 30 sn'de kesiliyor; bu butce dolmadan mutlaka cevap
+# donuyoruz ki kullanici 504 yerine ACIKLAYICI bir mesaj gorsun.
+TOPLAM_BUTCE = 14
+BAGLANTI_ZAMAN_ASIMI = 5      # el sikisma
+OKUMA_ZAMAN_ASIMI = 8         # govdeyi okuma
+
 # Sirayla denenecek TKGM adresleri. Ilki cevap verirse digerleri atlanir.
 # {lat} ve {lon} yer tutucular.
 TKGM_ADRESLERI = [
@@ -66,7 +73,28 @@ ALAN_ESLESMESI = {
     "pafta":     ["pafta", "PAFTA", "paftaNo", "paftano", "sheetNumber"],
     "parsel_id": ["parselId", "parselid", "id", "PARSELID", "objectId", "parcelId"],
     "durum":     ["durum", "DURUM", "status"],
+    "ozet":      ["ozet", "OZET", "özet"],
+    "zemin":     ["zeminKmdurum", "zeminkmdurum", "zeminTipi", "zemintipi"],
 }
+
+# Servis "o noktada parsel yok" durumunu JSON degil XML ile bildiriyor:
+#   <Error><Message>Parsel Bulunamadı: Enlem = ... </Message></Error>
+# Bu BIR HATA DEGIL, gecerli bir cevaptir. Onceki surumde hata sayilip
+# yedek adresler de deneniyordu ve fonksiyon zaman asimina ugruyordu (504).
+BULUNAMADI_IZLERI = ("parsel bulunamad", "<error>", "bulunamadı", "bulunamadi")
+
+
+def xml_mesaji(govde):
+    """<Message>...</Message> icindeki metni dondurur (yoksa None)."""
+    if not govde:
+        return None
+    bas = govde.lower().find("<message>")
+    if bas == -1:
+        return None
+    son = govde.lower().find("</message>", bas)
+    if son == -1:
+        return None
+    return govde[bas + 9:son].strip() or None
 
 
 def kullanici_dogrula(kullanici_token):
@@ -219,34 +247,62 @@ def koordinat_sinirlari(geometri):
 
 def tkgm_sorgula(lat, lon):
     """
-    TKGM'yi sirayla dener; ilk gecerli JSON yaniti kazanir.
-    Tum adresler basarisizsa denemelerin ozetiyle hata firlatir.
+    TKGM'yi sirayla dener.
+
+    Doner: (veri, adres, denemeler, bulunamadi_mesaji)
+      - veri dolu              -> parsel bulundu
+      - bulunamadi_mesaji dolu -> servis cevap verdi, o noktada parsel YOK
+      - ikisi de bossa         -> hata firlatilir
+
+    Yedek adresler SADECE ilk adres hic cevap veremediginde denenir.
+    "Parsel yok" cevabi gelirse zincir orada biter; aksi halde her nokta
+    icin uc istek atilip fonksiyon zaman asimina ugruyordu.
     """
+    import time
+    baslangic = time.monotonic()
     denemeler = []
 
     for kalip in TKGM_ADRESLERI:
+        kalan = TOPLAM_BUTCE - (time.monotonic() - baslangic)
+        if kalan <= 2:
+            denemeler.append("süre bütçesi doldu, kalan adresler denenmedi")
+            break
+
+        alan_adi = kalip.split('/')[2]
         adres = kalip.format(lat=f"{lat:.7f}", lon=f"{lon:.7f}")
         try:
-            yanit = requests.get(adres, headers=BASLIKLAR, timeout=20)
+            yanit = requests.get(
+                adres,
+                headers=BASLIKLAR,
+                timeout=(BAGLANTI_ZAMAN_ASIMI, min(OKUMA_ZAMAN_ASIMI, max(2, kalan))),
+            )
         except requests.RequestException as e:
-            denemeler.append(f"{adres.split('/')[2]}: bağlantı hatası ({type(e).__name__})")
+            denemeler.append(f"{alan_adi}: bağlantı hatası ({type(e).__name__})")
             continue
 
-        if yanit.status_code != 200:
-            denemeler.append(f"{adres.split('/')[2]}: HTTP {yanit.status_code}")
-            continue
+        govde = (yanit.text or "").strip()
+        kucuk = govde.lower()
 
+        # 1) Servis "burada parsel yok" diyor -> gecerli cevap, zinciri bitir
+        if any(iz in kucuk for iz in BULUNAMADI_IZLERI):
+            denemeler.append(f"{alan_adi}: parsel kaydı yok (HTTP {yanit.status_code})")
+            return None, adres, denemeler, (
+                xml_mesaji(govde) or "Bu noktada tescilli parsel kaydı bulunamadı."
+            )
+
+        # 2) Gecerli JSON mu
         try:
-            veri = yanit.json()
+            veri = json.loads(govde) if govde else None
         except ValueError:
-            denemeler.append(f"{adres.split('/')[2]}: JSON değil ({yanit.text[:80]})")
+            denemeler.append(f"{alan_adi}: JSON değil (HTTP {yanit.status_code}, {govde[:70]})")
             continue
 
         if not veri:
-            denemeler.append(f"{adres.split('/')[2]}: boş yanıt")
+            denemeler.append(f"{alan_adi}: boş yanıt (HTTP {yanit.status_code})")
             continue
 
-        return veri, adres, denemeler
+        denemeler.append(f"{alan_adi}: başarılı (HTTP {yanit.status_code})")
+        return veri, adres, denemeler, None
 
     raise RuntimeError(
         "TKGM parsel servisine ulaşılamadı. Denenenler → " + " | ".join(denemeler)
@@ -278,7 +334,30 @@ class handler(BaseHTTPRequestHandler):
 
             kullanici_dogrula(kullanici_token)
 
-            veri, kullanilan_adres, denemeler = tkgm_sorgula(lat, lon)
+            veri, kullanilan_adres, denemeler, bulunamadi = tkgm_sorgula(lat, lon)
+
+            # Servis cevap verdi ama o noktada parsel yok: bu bir HATA DEGIL.
+            # Kullaniciya net bilgi donuyoruz, kirmizi hata kutusu gostermiyoruz.
+            if bulunamadi:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "ok": True,
+                    "nokta": {"lat": lat, "lon": lon},
+                    "alanlar": {ad: None for ad in ALAN_ESLESMESI},
+                    "geometri": None,
+                    "kimlik_var": False,
+                    "uyari": (
+                        f"{bulunamadi} Bu nokta yol, dere, orman veya kadastro dışı "
+                        f"bir alana denk geliyor olabilir; birkaç metre yana al ve "
+                        f"tekrar dene."
+                    ),
+                    "kaynak": kullanilan_adres.split('/')[2],
+                    "denemeler": denemeler,
+                    "ham": {},
+                }, ensure_ascii=False).encode('utf-8'))
+                return
 
             ozellikler = ozellikleri_bul(veri)
             geometri, geo_hatasi = koordinat_sinirlari(geometri_bul(veri))

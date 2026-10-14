@@ -118,8 +118,11 @@ export default function ParselKatmani({ nokta, acik = false, onKapat, onDurum })
   }, [nokta, sorgula]);
 
   const alanlar = sonuc?.alanlar || {};
-  const baslik = alanlar.ada && alanlar.parsel
-    ? `${alanlar.ada} / ${alanlar.parsel}`
+  // Bazı parsellerin ADASI YOKTUR (yalnızca parsel numarası verilir) —
+  // TKGM bu durumda adaNo alanını boş döndürüyor. Başlığı parsel
+  // numarasına bağlıyoruz, yoksa adasız parseller başlıksız kalıyordu.
+  const baslik = alanlar.parsel
+    ? `${alanlar.ada || '—'} / ${alanlar.parsel}`
     : null;
 
   return (
@@ -215,6 +218,7 @@ export default function ParselKatmani({ nokta, acik = false, onKapat, onDurum })
                 </div>
               )}
 
+              {sonuc.kimlik_var && (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
                 <tbody>
                   {SATIRLAR.map(([anahtar, etiket]) => (
@@ -244,6 +248,7 @@ export default function ParselKatmani({ nokta, acik = false, onKapat, onDurum })
                   </tr>
                 </tbody>
               </table>
+              )}
 
               <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
                 <button
