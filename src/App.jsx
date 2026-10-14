@@ -90,24 +90,41 @@ function CizimAraci({ onAlanCizildi }) {
       if (e.shape === 'Marker') {
         const katman = e.layer;
         const { lat, lng } = katman.getLatLng();
-        katman
-          .bindPopup(`
-            <div style="font-size:12px; line-height:1.5;">
-              <b>📍 İşaretlenen Konum</b><br/>
-              ${lat.toFixed(6)}, ${lng.toFixed(6)}<br/>
-              <div style="display:flex; gap:6px; margin-top:6px;">
-                <button
-                  onclick="window.__konumPaylas(${lat}, ${lng})"
-                  style="padding:6px 10px; border:none; border-radius:6px; background:#2563eb; color:white; cursor:pointer; font-size:12px;"
-                >Paylaş</button>
-                <button
-                  onclick="window.__parselSorgula && window.__parselSorgula(${lat}, ${lng})"
-                  style="padding:6px 10px; border:none; border-radius:6px; background:#0e7490; color:white; cursor:pointer; font-size:12px;"
-                >🧾 Parsel</button>
-              </div>
-            </div>
-          `)
-          .openPopup();
+
+        // Balonu HTML METNİ yerine gerçek DOM olarak kuruyoruz.
+        // Neden: onclick="..." ile yazılan düğme yalnızca global
+        // fonksiyonlara ulaşabiliyor, bu yüzden "bu pini kaldır" gibi
+        // KATMANIN KENDİSİNE ihtiyaç duyan bir işlem yapılamıyordu.
+        // DOM düğümüne gerçek dinleyici bağlayınca katman kapsamda kalıyor.
+        const kutu = document.createElement('div');
+        kutu.style.cssText = 'font-size:12px; line-height:1.5; min-width:190px;';
+        kutu.innerHTML = `
+          <b>📍 İşaretlenen Konum</b><br/>
+          <span style="font-family:monospace;">${lat.toFixed(6)}, ${lng.toFixed(6)}</span>
+          <div style="display:flex; gap:6px; margin-top:8px;">
+            <button data-rol="paylas" style="flex:1; padding:8px 10px; border:none; border-radius:6px; background:#2563eb; color:white; cursor:pointer; font-size:12px;">Paylaş</button>
+            <button data-rol="parsel" style="flex:1; padding:8px 10px; border:none; border-radius:6px; background:#0e7490; color:white; cursor:pointer; font-size:12px;">🧾 Parsel</button>
+            <button data-rol="kaldir" title="Bu pini kaldır" style="padding:8px 11px; border:1px solid #fca5a5; border-radius:6px; background:#fff; color:#dc2626; cursor:pointer; font-size:13px;">🗑</button>
+          </div>`;
+
+        kutu.querySelector('[data-rol="paylas"]')
+          .addEventListener('click', () => window.__konumPaylas(lat, lng));
+
+        kutu.querySelector('[data-rol="parsel"]')
+          .addEventListener('click', () => {
+            if (window.__parselSorgula) window.__parselSorgula(lat, lng);
+          });
+
+        kutu.querySelector('[data-rol="kaldir"]')
+          .addEventListener('click', () => {
+            katman.closePopup();
+            map.removeLayer(katman);
+            // Pin gidince ona ait parsel sınırı ve paneli de temizlensin
+            if (window.__parselTemizle) window.__parselTemizle();
+          });
+
+        katman.bindPopup(kutu).openPopup();
+
         // Pin bırakılır bırakılmaz parsel sorgusu başlasın; kullanıcı
         // ayrıca balondaki düğmeyle tekrar sorgulayabilir.
         if (window.__parselSorgula) window.__parselSorgula(lat, lng);
@@ -120,6 +137,11 @@ function CizimAraci({ onAlanCizildi }) {
         lng: nokta.lng,
       }));
       onAlanCizildi(koordinatlar, katman);
+    });
+
+    // Geoman'ın çöp kutusu moduyla silinen pin için de aynı temizlik
+    map.on('pm:remove', (e) => {
+      if (e.shape === 'Marker' && window.__parselTemizle) window.__parselTemizle();
     });
   }, [map, onAlanCizildi]);
 
@@ -302,7 +324,16 @@ function AnaUygulama({ oturum, rol }) {
       setParselNoktasi({ lat, lng });
       setAcikPanel('parsel');
     };
-    return () => { delete window.__parselSorgula; };
+    // Pin kaldırıldığında parsel sınırını ve panelini de temizler
+    window.__parselTemizle = () => {
+      setParselNoktasi(null);
+      setParselDurum(null);
+      setAcikPanel((mevcut) => (mevcut === 'parsel' ? null : mevcut));
+    };
+    return () => {
+      delete window.__parselSorgula;
+      delete window.__parselTemizle;
+    };
   }, []);
 
   const TARAMA_ASAMALARI = [

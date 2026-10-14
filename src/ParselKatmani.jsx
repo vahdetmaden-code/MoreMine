@@ -109,7 +109,13 @@ export default function ParselKatmani({ nokta, acik = false, onKapat, onDurum })
   // Pin değiştiğinde otomatik sorgula. Aynı noktada tekrar tekrar
   // istek atmamak için son sorgulanan koordinatı hatırlıyoruz.
   useEffect(() => {
-    if (!nokta) return;
+    // Pin kaldırıldı (nokta null) -> sınırı ve sonucu haritadan sil
+    if (!nokta) {
+      sonSorguRef.current = null;
+      setSonuc(null);
+      setHata(null);
+      return;
+    }
     const imza = `${nokta.lat.toFixed(6)},${nokta.lng.toFixed(6)}`;
     if (sonSorguRef.current === imza) return;
     sonSorguRef.current = imza;
